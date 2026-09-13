@@ -240,6 +240,7 @@ class DerivFeed {
         state.status = "LIVE";
         state.ticks++;
         this.ticksReceived++;
+        this.lastTickAt = Date.now();
         this.dirty = true;
       }
     };
