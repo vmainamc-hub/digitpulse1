@@ -73,7 +73,7 @@ export const journal = {
     return snapshot;
   },
   getServerSnapshot(): Observation[] {
-    return [];
+    return EMPTY_OBSERVATIONS;
   },
   record(
     symbol: string,
