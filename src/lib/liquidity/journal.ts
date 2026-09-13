@@ -36,6 +36,7 @@ const CAP = 400;
 
 let cache: Observation[] | null = null;
 const listeners = new Set<() => void>();
+const EMPTY_OBSERVATIONS: Observation[] = [];
 let snapshot: Observation[] = [];
 
 function load(): Observation[] {
