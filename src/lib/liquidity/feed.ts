@@ -9,7 +9,14 @@
  * subscribes and never writes back.
  */
 
-import { HISTORY_CAP, UNIVERSE, WS_LEGACY, WS_PRIMARY, type MarketDef } from "./universe";
+import {
+  HISTORY_CAP,
+  UNIVERSE,
+  WS_LEGACY,
+  WS_PRIMARY,
+  getMarketPipSize,
+  type MarketDef,
+} from "./universe";
 import { lastDigit } from "./math";
 import type { Tick } from "./engine";
 
@@ -46,8 +53,8 @@ export interface FeedSnapshot {
 }
 
 const EMIT_INTERVAL = 500;
-const POLL_INTERVAL = 4_000;
-const TICK_SILENCE_MS = 8_000;
+const POLL_INTERVAL = 2_500;
+const TICK_SILENCE_MS = 3_000;
 const MARKET_STALE_MS = 20_000;
 
 type PendingKind = "ACTIVE_SYMBOLS" | "HISTORY" | "SUBSCRIBE" | "PING";
@@ -68,6 +75,7 @@ class DerivFeed {
   private pending = new Map<number, Pending>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private emitTimer: ReturnType<typeof setInterval> | null = null;
+  private pingTimer: ReturnType<typeof setInterval> | null = null;
   private dirty = false;
   private version = 0;
   private ticksReceived = 0;
@@ -76,6 +84,7 @@ class DerivFeed {
   private started = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private lastTickAt = 0;
+  private lastStreamingTickAt = 0;
   private symbolsChecked = false;
   private engineBusy = false;
   private analysisLagMs = 0;
@@ -171,9 +180,13 @@ class DerivFeed {
     if (this.started || typeof window === "undefined") return;
     this.started = true;
     this.emitTimer = setInterval(() => this.emit(true), EMIT_INTERVAL);
-    // Some networks/regions reject the streaming `ticks` subscription while
-    // `ticks_history` still resolves. Refresh history whenever the live stream
-    // is silent so the analytics keep advancing instead of freezing.
+    // Keep WebSocket connection alive with periodic pings every 20 seconds
+    this.pingTimer = setInterval(() => {
+      if (this.socket?.readyState === 1) {
+        this.send(this.socket, { ping: 1 }, { kind: "PING", at: Date.now() });
+      }
+    }, 20_000);
+    // Refresh history whenever live stream is silent so the analytics keep advancing
     this.pollTimer = setInterval(() => this.pollHistory(), POLL_INTERVAL);
     this.connect();
   }
@@ -197,16 +210,17 @@ class DerivFeed {
     const socket = this.socket;
     if (!socket || socket.readyState !== 1) return;
     if (Date.now() - this.lastTickAt < TICK_SILENCE_MS) return;
-    this.requestHistory(socket);
+    this.requestHistory(socket, 20);
   }
 
-  private requestHistory(socket: WebSocket) {
+  private requestHistory(socket: WebSocket, count = HISTORY_CAP) {
     for (const m of UNIVERSE) {
       const state = this.states.get(m.symbol);
       if (state?.status === "UNAVAILABLE") continue;
+      const targetCount = state && state.history.length >= 100 ? count : HISTORY_CAP;
       this.send(
         socket,
-        { ticks_history: m.symbol, count: HISTORY_CAP, end: "latest", style: "ticks" },
+        { ticks_history: m.symbol, count: targetCount, end: "latest", style: "ticks" },
         { kind: "HISTORY", symbol: m.symbol, at: Date.now() },
       );
     }
@@ -297,46 +311,70 @@ class DerivFeed {
       if (msg["msg_type"] === "history") {
         const echo = msg["echo_req"] as { ticks_history?: string } | undefined;
         const symbol = pending?.symbol ?? echo?.ticks_history;
-        const history = msg["history"] as { prices?: number[]; times?: number[] } | undefined;
+        const history = msg["history"] as
+          { prices?: (number | string)[]; times?: number[] } | undefined;
         const prices = history?.prices ?? [];
         const times = history?.times ?? [];
         if (!symbol || !prices.length) return;
         const state = this.states.get(symbol);
         if (!state) return;
-        const bootstrap: Tick[] = prices.map((q, i) => ({
-          q: Number(q),
-          d: lastDigit(q),
-          t: Number(times[i] ?? 0),
-        }));
+
+        const pipSize =
+          typeof msg["pip_size"] === "number"
+            ? (msg["pip_size"] as number)
+            : (state.pip_size ?? getMarketPipSize(symbol));
+        state.pip_size = pipSize;
+
+        const bootstrap: Tick[] = prices.map((q, i) => {
+          const numQ = Number(q);
+          return {
+            q: numQ,
+            d: lastDigit(numQ, pipSize),
+            t: Number(times[i] ?? 0),
+          };
+        });
+        const prevLastTime = state.history[state.history.length - 1]?.t ?? 0;
         const lastBootstrapTime = bootstrap[bootstrap.length - 1]?.t ?? 0;
         const newer = state.history.filter((t) => t.t > lastBootstrapTime);
         const merged = [...bootstrap, ...newer].slice(-HISTORY_CAP);
-        const advanced =
-          merged.length !== state.history.length ||
-          (merged[merged.length - 1]?.t ?? 0) !== (state.history[state.history.length - 1]?.t ?? 0);
+        const newTicks =
+          prevLastTime === 0 ? merged.length : merged.filter((t) => t.t > prevLastTime).length;
         state.history = merged;
         const latest = merged[merged.length - 1];
         state.last = latest?.q ?? null;
         state.epoch = latest?.t ?? null;
         state.status = "LIVE";
-        if (advanced) state.lastTickAt = Date.now();
+        if (newTicks > 0) {
+          state.ticks += newTicks;
+          this.ticksReceived += newTicks;
+          state.lastTickAt = Date.now();
+          this.lastTickAt = Date.now();
+        }
         this.dirty = true;
         return;
       }
 
       if (msg["msg_type"] === "tick") {
-        const tick = msg["tick"] as { symbol?: string; quote?: number; epoch?: number } | undefined;
+        const tick = msg["tick"] as
+          | { symbol?: string; quote?: number | string; epoch?: number; pip_size?: number }
+          | undefined;
         const symbol = tick?.symbol ?? pending?.symbol;
         if (!symbol || !tick) return;
         const state = this.states.get(symbol);
         if (!state) return;
         const q = Number(tick.quote);
         if (!Number.isFinite(q)) return;
+        const pipSize =
+          typeof tick.pip_size === "number"
+            ? tick.pip_size
+            : (state.pip_size ?? getMarketPipSize(symbol));
+        state.pip_size = pipSize;
         const epoch = Number(tick.epoch ?? 0);
         if (state.history[state.history.length - 1]?.t === epoch) return;
-        state.history = [...state.history, { q, d: lastDigit(tick.quote ?? q), t: epoch }].slice(
-          -HISTORY_CAP,
-        );
+        state.history = [
+          ...state.history,
+          { q, d: lastDigit(tick.quote ?? q, pipSize), t: epoch },
+        ].slice(-HISTORY_CAP);
         state.last = q;
         state.epoch = epoch;
         state.status = "LIVE";
@@ -367,6 +405,7 @@ class DerivFeed {
   stop() {
     if (this.emitTimer) clearInterval(this.emitTimer);
     if (this.pollTimer) clearInterval(this.pollTimer);
+    if (this.pingTimer) clearInterval(this.pingTimer);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     try {
       this.socket?.close();

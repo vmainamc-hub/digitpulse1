@@ -226,8 +226,28 @@ export function pageHinkley(values: number[], delta = 0.01, threshold = 5) {
   return clamp((Math.max(Math.abs(cum - min), Math.abs(cum - max)) / threshold) * 20);
 }
 
-/** Last decimal digit of a Deriv quote string. */
-export function lastDigit(q: number | string): number {
+/**
+ * Last decimal digit of a Deriv quote.
+ * Respects Deriv canonical pip_size (decimal precision) so trailing zeros (e.g. 4851.830 -> 0)
+ * are accurately preserved and never truncated by JavaScript floating-point representations.
+ */
+export function lastDigit(q: number | string, pipSize?: number): number {
+  if (typeof pipSize === "number" && pipSize >= 0) {
+    const num = typeof q === "number" ? q : Number(q);
+    if (Number.isFinite(num)) {
+      const formatted = num.toFixed(pipSize);
+      const lastChar = formatted[formatted.length - 1];
+      const d = Number(lastChar);
+      return Number.isFinite(d) && d >= 0 && d <= 9 ? d : 0;
+    }
+  }
+  if (typeof q === "string" && q.includes(".")) {
+    const clean = q.trim();
+    const lastChar = clean[clean.length - 1];
+    if (lastChar && /^\d$/.test(lastChar)) {
+      return Number(lastChar);
+    }
+  }
   const m = String(q).match(/(\d)(?!.*\d)/);
   return m?.[1] ? Number(m[1]) : 0;
 }

@@ -12,25 +12,31 @@ export interface MarketDef {
   symbol: string;
   name: string;
   group: MarketGroup;
+  pip_size: number;
 }
 
 export const UNIVERSE: MarketDef[] = [
-  { symbol: "R_10", name: "Volatility 10", group: "STANDARD" },
-  { symbol: "R_25", name: "Volatility 25", group: "STANDARD" },
-  { symbol: "R_50", name: "Volatility 50", group: "STANDARD" },
-  { symbol: "R_75", name: "Volatility 75", group: "STANDARD" },
-  { symbol: "R_100", name: "Volatility 100", group: "STANDARD" },
-  { symbol: "1HZ10V", name: "Volatility 10 (1s)", group: "1S" },
-  { symbol: "1HZ25V", name: "Volatility 25 (1s)", group: "1S" },
-  { symbol: "1HZ50V", name: "Volatility 50 (1s)", group: "1S" },
-  { symbol: "1HZ75V", name: "Volatility 75 (1s)", group: "1S" },
-  { symbol: "1HZ100V", name: "Volatility 100 (1s)", group: "1S" },
-  { symbol: "JD10", name: "Jump 10", group: "JUMP" },
-  { symbol: "JD25", name: "Jump 25", group: "JUMP" },
-  { symbol: "JD50", name: "Jump 50", group: "JUMP" },
-  { symbol: "JD75", name: "Jump 75", group: "JUMP" },
-  { symbol: "JD100", name: "Jump 100", group: "JUMP" },
+  { symbol: "R_10", name: "Volatility 10", group: "STANDARD", pip_size: 3 },
+  { symbol: "R_25", name: "Volatility 25", group: "STANDARD", pip_size: 3 },
+  { symbol: "R_50", name: "Volatility 50", group: "STANDARD", pip_size: 4 },
+  { symbol: "R_75", name: "Volatility 75", group: "STANDARD", pip_size: 4 },
+  { symbol: "R_100", name: "Volatility 100", group: "STANDARD", pip_size: 2 },
+  { symbol: "1HZ10V", name: "Volatility 10 (1s)", group: "1S", pip_size: 2 },
+  { symbol: "1HZ25V", name: "Volatility 25 (1s)", group: "1S", pip_size: 2 },
+  { symbol: "1HZ50V", name: "Volatility 50 (1s)", group: "1S", pip_size: 2 },
+  { symbol: "1HZ75V", name: "Volatility 75 (1s)", group: "1S", pip_size: 2 },
+  { symbol: "1HZ100V", name: "Volatility 100 (1s)", group: "1S", pip_size: 2 },
+  { symbol: "JD10", name: "Jump 10", group: "JUMP", pip_size: 2 },
+  { symbol: "JD25", name: "Jump 25", group: "JUMP", pip_size: 2 },
+  { symbol: "JD50", name: "Jump 50", group: "JUMP", pip_size: 2 },
+  { symbol: "JD75", name: "Jump 75", group: "JUMP", pip_size: 2 },
+  { symbol: "JD100", name: "Jump 100", group: "JUMP", pip_size: 2 },
 ];
+
+export function getMarketPipSize(symbol: string): number {
+  const m = UNIVERSE.find((u) => u.symbol === symbol);
+  return m ? m.pip_size : 2;
+}
 
 export const MARKET_GROUPS: MarketGroup[] = ["STANDARD", "1S", "JUMP"];
 

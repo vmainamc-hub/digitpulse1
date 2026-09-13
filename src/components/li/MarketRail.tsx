@@ -56,7 +56,7 @@ export function MarketRail({
                       </span>
                       <span className="tabular block text-[10px] text-muted-foreground">
                         {m.symbol} · {m.history.length} ticks
-                        {m.last !== null ? ` · ${m.last}` : ""}
+                        {m.last !== null ? ` · ${m.last.toFixed(m.pip_size ?? 2)}` : ""}
                       </span>
                     </span>
                     <span className="flex shrink-0 flex-col items-end gap-0.5">
