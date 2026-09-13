@@ -527,8 +527,8 @@ export function ResearchView({
               </div>
             ))}
             {a.transition.map((row, i) => (
-              <>
-                <div key={`h${i}`} className="mono-label pr-1 text-right">
+              <Fragment key={`r${i}`}>
+                <div className="mono-label pr-1 text-right">
                   {i}
                 </div>
                 {row.map((v, j) => (
