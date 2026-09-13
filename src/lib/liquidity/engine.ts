@@ -43,6 +43,19 @@ import {
   wilson,
   type HazardPoint,
 } from "./math";
+import {
+  V3_WINDOWS,
+  buildPsychology1000,
+  getMarketSentinelPsychology,
+  temporalFor,
+  transitionEvidence,
+  analyzeLiquidity,
+  type DigitTemporal,
+  type LiquidityOpportunity,
+  type MarketSentinelPsychology,
+  type Psychology1000,
+  type TransitionEvidence,
+} from "./liquidity-v3";
 
 export interface Tick {
   q: number;
@@ -125,6 +138,22 @@ export interface ContractAnalysis {
   law: boolean;
   ripe: boolean;
   confirmed: boolean;
+  v3?: LiquidityOpportunity;
+  psychology1000?: Psychology1000;
+  reservoirScore?: number;
+  exhaustionScore?: number;
+  deliveryScore?: number;
+  migrationScore?: number;
+  absorptionScore?: number;
+  confirmationScore?: number;
+  conflictScore?: number;
+  evidence?: string[];
+  vetoes?: string[];
+  temporal?: Record<number, DigitTemporal>;
+  transitions?: TransitionEvidence[];
+  entropyVelocity?: number;
+  entropyAcceleration?: number;
+  jsdScore?: number;
 }
 
 export interface ParityAnalysis {
@@ -139,6 +168,12 @@ export interface MarketAnalysis {
   sample: number;
   last: number;
   observationId: string;
+  sentinelPsychology: MarketSentinelPsychology;
+  temporal: Record<number, DigitTemporal>;
+  v3Opportunities: Record<string, LiquidityOpportunity>;
+  entropyVelocity: number;
+  entropyAcceleration: number;
+  jsd500: number;
   f1000: number[];
   f20: number[];
   f50: number[];
@@ -258,11 +293,18 @@ function hmmProxy(ds: number[]): HmmInfo {
  */
 function detectSweep(recent: number[], baseline: number[]): SweepInfo {
   if (recent.length < 20)
-    return { active: false, side: "NONE", intensity: 0, boundaryBurst: 0, reversion: 0, note: "Insufficient sample." };
+    return {
+      active: false,
+      side: "NONE",
+      intensity: 0,
+      boundaryBurst: 0,
+      reversion: 0,
+      note: "Insufficient sample.",
+    };
   const fr = freq(recent);
   const fb = freq(baseline);
-  const lowExtreme = ((fr[0] ?? 0) + (fr[1] ?? 0)) - ((fb[0] ?? 0) + (fb[1] ?? 0));
-  const highExtreme = ((fr[8] ?? 0) + (fr[9] ?? 0)) - ((fb[8] ?? 0) + (fb[9] ?? 0));
+  const lowExtreme = (fr[0] ?? 0) + (fr[1] ?? 0) - ((fb[0] ?? 0) + (fb[1] ?? 0));
+  const highExtreme = (fr[8] ?? 0) + (fr[9] ?? 0) - ((fb[8] ?? 0) + (fb[9] ?? 0));
   const half = Math.floor(recent.length / 2);
   const firstHalf = recent.slice(0, half);
   const secondHalf = recent.slice(half);
@@ -289,7 +331,12 @@ function detectSweep(recent: number[], baseline: number[]): SweepInfo {
   };
 }
 
-function analyzeContract(ds: number[], f: Features, c: ContractDef): ContractAnalysis {
+function analyzeContract(
+  ds: number[],
+  f: Features,
+  c: ContractDef,
+  v3Opp: LiquidityOpportunity,
+): ContractAnalysis {
   const win = (d: number) => contractMask(c.kind, c.barrier, d);
   const n = Math.max(1, ds.length);
   const wins = ds.filter(win).length;
@@ -312,87 +359,77 @@ function analyzeContract(ds: number[], f: Features, c: ContractDef): ContractAna
   const loseMomentum = mean(losingDigits.slice(-20).map((d) => f.digitMomentum[d] ?? 0));
   const pressure = clamp(50 + (winMomentum - loseMomentum) * 3);
 
-  const concentration = clamp(Math.abs(wf - 0.5) * 200);
-  const persistence = clamp(wr.current * 8 + wr.max * 3);
-  const opposingExhaustion = clamp(
-    Math.max(0, lr.max - 2) * 10 + Math.max(0, -loseMomentum) * 2,
-  );
-
-  // LAW 1 — liquidity only exists where creation was observed.
-  const creation = clamp(
-    concentration * 0.34 +
-      persistence * 0.18 +
-      Math.abs(drift) * 240 * 0.2 +
-      Math.abs(pressure - 50) * 0.18 +
-      (100 - f.fluctuation) * 0.1,
-  );
+  // V3 Quantitative metrics
+  const creation = v3Opp.reservoirScore;
   const maturity = clamp(
-    creation * 0.55 +
-      concentration * 0.2 +
-      Math.min(100, f.persistence) * 0.15 +
-      Math.max(0, 50 - f.changePoint) * 0.1,
+    v3Opp.reservoirScore * 0.5 +
+      v3Opp.exhaustionScore * 0.3 +
+      (v3Opp.ageTicks > 15 ? 20 : v3Opp.ageTicks),
   );
-  const absorption = clamp(
-    opposingExhaustion * 0.35 + boundaryAttack * 0.25 + f.sweep.boundaryBurst * 0.2 + Math.max(0, -drift) * 200 * 0.2,
-  );
-  const exhaustion = clamp(
-    opposingExhaustion * 0.45 +
-      f.fluctuation * 0.28 +
-      Math.max(0, f.entropyShock) * 0.45 +
-      boundaryAttack * 0.18,
-  );
-  // LAW 3 — release requires observed structural change.
-  const release = clamp(
-    Math.max(0, exhaustion - 35) * 1.1 +
-      Math.max(0, drift) * 220 * 0.3 +
-      Math.max(0, pressure - 50) * 0.35 +
-      (100 - f.transitionStability) * 0.15,
-  );
-  const conflict = clamp(
-    Math.abs(rf - wf) * 180 + Math.abs(f.zoneMomentum) * 0.7 + f.changePoint * 0.2,
-  );
+  const absorption = v3Opp.absorptionScore;
+  const exhaustion = v3Opp.exhaustionScore;
+  const release = v3Opp.deliveryScore;
+  const conflict = v3Opp.conflictScore;
   const danger = clamp(
-    f.anomaly * 0.25 +
-      f.fluctuation * 0.18 +
-      boundaryAttack * 0.12 +
-      conflict * 0.18 +
-      Math.max(0, exhaustion - 70) * 0.32 +
+    v3Opp.conflictScore * 0.35 +
+      f.anomaly * 0.2 +
       f.regimeDanger * 0.15 +
-      (f.sweep.active ? 12 : 0),
+      Math.max(0, exhaustion - 75) * 0.3,
   );
 
-  // LAW 4 — decomposable multi-dimensional confirmation.
+  // LAW 4 — decomposable multi-dimensional confirmation based on V3 engines.
   const dimensions: ConfirmationComponent[] = [
-    { key: "creation", label: "Observed creation", value: creation, weight: 0.15, supports: creation >= 45 },
-    { key: "maturity", label: "Maturation", value: maturity, weight: 0.16, supports: maturity >= 55 },
-    { key: "release", label: "Structural release", value: release, weight: 0.22, supports: release >= 60 },
-    { key: "pressure", label: "Digit pressure", value: pressure, weight: 0.15, supports: pressure >= 56 },
-    { key: "safety", label: "Danger clearance", value: 100 - danger, weight: 0.14, supports: danger < 55 },
-    { key: "coherence", label: "Evidence coherence", value: 100 - conflict, weight: 0.08, supports: conflict < 55 },
-    { key: "posterior", label: "Bayesian posterior", value: f.bayesian[c.id] ?? 0, weight: 0.1, supports: (f.bayesian[c.id] ?? 0) >= 55 },
+    {
+      key: "reservoir",
+      label: "Reservoir depth (Red/2nd Red)",
+      value: v3Opp.reservoirScore,
+      weight: 0.18,
+      supports: v3Opp.reservoirScore >= 55,
+    },
+    {
+      key: "exhaustion",
+      label: "Dominant exhaustion (Green/2nd Green)",
+      value: v3Opp.exhaustionScore,
+      weight: 0.2,
+      supports: v3Opp.exhaustionScore >= 62,
+    },
+    {
+      key: "delivery",
+      label: "Reservoir delivery slope",
+      value: v3Opp.deliveryScore,
+      weight: 0.24,
+      supports: v3Opp.deliveryScore >= 62,
+    },
+    {
+      key: "migration",
+      label: "Dominant→reservoir migration",
+      value: v3Opp.migrationScore,
+      weight: 0.16,
+      supports: v3Opp.migrationScore >= 50,
+    },
+    {
+      key: "absorption",
+      label: "Structural absorption",
+      value: v3Opp.absorptionScore,
+      weight: 0.12,
+      supports: v3Opp.absorptionScore >= 55,
+    },
+    {
+      key: "divergence",
+      label: "Distribution departure (JSD)",
+      value: clamp(v3Opp.jsd * 220),
+      weight: 0.1,
+      supports: v3Opp.jsd >= 0.03,
+    },
   ];
-  const confirmation = clamp(dimensions.reduce((s, d) => s + d.value * d.weight, 0));
+
+  const confirmation = v3Opp.confirmationScore;
   const supportCount = dimensions.filter((d) => d.supports).length;
 
-  const law = creation >= 25;
-  const ripe = release >= 65 && maturity >= 62;
-  // LAW 5 — RIPE is never CONFIRMED. LAW 4 — a single indicator never qualifies.
-  const confirmed =
-    ripe && confirmation >= 78 && supportCount >= 5 && danger < 48 && conflict < 55;
-
-  let state: LiquidityState = "ABSENT";
-  if (creation >= 25) state = "FORMING";
-  if (creation >= 45) state = "BUILDING";
-  if (maturity >= 62) state = "MATURE";
-  if (absorption >= 55) state = "ABSORBING";
-  if (exhaustion >= 68) state = "EXHAUSTING";
-  if (ripe) state = "RIPE";
-  if (release >= 78 && maturity >= 62) state = "RELEASED";
-  if (confirmed) state = "CONFIRMED";
-  // LAW 6 — conflicting evidence stays CONFLICTED, never forced.
-  if (!confirmed && conflict >= 60 && law) state = "CONFLICTED";
-  if (danger >= 78 || conflict >= 82) state = "BLOCKED";
-  if (!law) state = "ABSENT";
+  const law = v3Opp.reservoirScore >= 25 && v3Opp.lifecycle !== "NO_LIQUIDITY";
+  const ripe = v3Opp.lifecycle === "RIPE" || v3Opp.lifecycle === "CONFIRMED";
+  const confirmed = v3Opp.lifecycle === "CONFIRMED";
+  const state: LiquidityState = v3Opp.lifecycle as LiquidityState;
 
   return {
     id: c.id,
@@ -424,6 +461,22 @@ function analyzeContract(ds: number[], f: Features, c: ContractDef): ContractAna
     law,
     ripe,
     confirmed,
+    v3: v3Opp,
+    psychology1000: v3Opp.psychology,
+    reservoirScore: v3Opp.reservoirScore,
+    exhaustionScore: v3Opp.exhaustionScore,
+    deliveryScore: v3Opp.deliveryScore,
+    migrationScore: v3Opp.migrationScore,
+    absorptionScore: v3Opp.absorptionScore,
+    confirmationScore: v3Opp.confirmationScore,
+    conflictScore: v3Opp.conflictScore,
+    evidence: v3Opp.evidence,
+    vetoes: v3Opp.vetoes,
+    temporal: v3Opp.temporal,
+    transitions: v3Opp.transitions,
+    entropyVelocity: v3Opp.entropyVelocity,
+    entropyAcceleration: v3Opp.entropyAcceleration,
+    jsdScore: v3Opp.jsd,
   };
 }
 
@@ -440,7 +493,12 @@ function analyzeParity(ds: number[], anomaly: number, fluctuation: number): Pari
   const danger = clamp(anomaly * 0.4 + fluctuation * 0.3 + Math.abs(er - (1 - er)) * 120);
   return {
     even: { share: e * 100, recent: er * 100, pressure: clamp(50 + (er - e) * 250), danger },
-    odd: { share: o * 100, recent: (1 - er) * 100, pressure: clamp(50 + (1 - er - o) * 250), danger },
+    odd: {
+      share: o * 100,
+      recent: (1 - er) * 100,
+      pressure: clamp(50 + (1 - er - o) * 250),
+      danger,
+    },
     low: { share: l * 100, recent: lr * 100, pressure: clamp(50 + (lr - l) * 250) },
     high: { share: h * 100, recent: (1 - lr) * 100, pressure: clamp(50 + (1 - lr - h) * 250) },
     zones: {
@@ -452,13 +510,36 @@ function analyzeParity(ds: number[], anomaly: number, fluctuation: number): Pari
   };
 }
 
-export function analyzeMarket(history: Tick[]): MarketAnalysis | null {
+export function analyzeMarket(
+  history: Tick[],
+  marketSymbol: string = "MARKET",
+  previousV3: Record<string, LiquidityOpportunity> = {},
+): MarketAnalysis | null {
   const ds = history.map((x) => x.d);
   if (ds.length < 30) return null;
 
+  const sentinelPsychology = getMarketSentinelPsychology(history);
+  const temporal: Record<number, DigitTemporal> = {};
+  for (let d = 0; d < 10; d++) {
+    temporal[d] = temporalFor(ds, d);
+  }
+
+  const v3Opportunities: Record<string, LiquidityOpportunity> = {};
+  for (const c of CONTRACTS) {
+    v3Opportunities[c.id] = analyzeLiquidity(
+      marketSymbol,
+      history,
+      c.kind,
+      c.barrier,
+      previousV3[c.id],
+    );
+  }
+
   const w = Object.fromEntries(WINDOWS.map((n) => [n, ds.slice(-n)])) as Record<number, number[]>;
   const w1000 = w[1000] ?? ds;
+  const w500 = w[500] ?? ds;
   const w200 = w[200] ?? ds;
+  const w120 = w[120] ?? ds;
   const w50 = w[50] ?? ds;
   const w20 = w[20] ?? ds;
 
@@ -466,8 +547,13 @@ export function analyzeMarket(history: Tick[]): MarketAnalysis | null {
   const f50 = freq(w50);
   const f20 = freq(w20);
   const ent1000 = normalizedEntropy(f1000);
+  const ent120 = normalizedEntropy(freq(w120));
+  const ent500 = normalizedEntropy(freq(w500));
   const ent20 = normalizedEntropy(f20);
   const js = jsd(f20, f1000);
+  const jsd500 = jsd(f20, freq(w500));
+  const entropyVelocity = ent20 - ent120;
+  const entropyAcceleration = ent20 - ent120 - (ent120 - ent500);
 
   const low20 = mean(w20.map((x) => (isLow(x) ? 1 : 0)));
   const low1000 = mean(w1000.map((x) => (isLow(x) ? 1 : 0)));
@@ -534,7 +620,7 @@ export function analyzeMarket(history: Tick[]): MarketAnalysis | null {
     sweep,
   };
 
-  const contracts = CONTRACTS.map((c) => analyzeContract(ds, features, c));
+  const contracts = CONTRACTS.map((c) => analyzeContract(ds, features, c, v3Opportunities[c.id]!));
   const parity = analyzeParity(ds, anomaly, fluctuation);
   const qualified = contracts.filter((x) => x.law).sort((a, b) => b.confirmation - a.confirmation);
   const top = qualified[0] ?? contracts[0]!;
@@ -545,6 +631,12 @@ export function analyzeMarket(history: Tick[]): MarketAnalysis | null {
     sample: ds.length,
     last: ds[ds.length - 1] ?? 0,
     observationId,
+    sentinelPsychology,
+    temporal,
+    v3Opportunities,
+    entropyVelocity,
+    entropyAcceleration,
+    jsd500,
     f1000,
     f20,
     f50,
@@ -587,12 +679,19 @@ export function analyzeMarket(history: Tick[]): MarketAnalysis | null {
 }
 
 export function makeExplanation(c: ContractAnalysis, a: MarketAnalysis): string[] {
+  const p = c.psychology1000 ?? a.sentinelPsychology;
+  const purpleStr = p.purple !== null ? `d${p.purple}` : "none";
   return [
-    `Liquidity law: ${c.law ? "formation observed" : "no formation observed — no liquidity claimed"}.`,
-    `Creation ${c.creation.toFixed(0)} · maturity ${c.maturity.toFixed(0)} · absorption ${c.absorption.toFixed(0)} · exhaustion ${c.exhaustion.toFixed(0)} · release ${c.release.toFixed(0)}.`,
-    `Digit pressure ${c.pressure.toFixed(0)} with ${c.drift.toFixed(1)}% recent-vs-baseline drift; current run ${c.run} vs opposing ${c.opposingRun}.`,
-    `Danger ${c.danger.toFixed(0)} · conflict ${c.conflict.toFixed(0)} · regime ${a.regime.state} · sweep ${a.sweep.active ? a.sweep.side : "none"}.`,
-    `${c.supportCount}/7 independent dimensions support this structure. ${c.ripe && !c.confirmed ? "RIPE is not CONFIRMED." : ""}`.trim(),
-    `Read as observed statistical structure only — not hidden order flow, not trader intent.`,
+    `1000-tick Sentinel psychology: Green d${p.green} · 2nd Green d${p.secondGreen} · Red d${p.red} · 2nd Red d${p.secondRed} · Purple ${purpleStr}.`,
+    `V3 Lifecycle: ${c.state} · confirmation ${c.confirmation.toFixed(0)} · reservoir depth ${(c.reservoirScore ?? c.creation).toFixed(0)} · dominant exhaustion ${(c.exhaustionScore ?? c.exhaustion).toFixed(0)}.`,
+    `Delivery ${(c.deliveryScore ?? c.release).toFixed(0)} · migration ${(c.migrationScore ?? 0).toFixed(0)} · absorption ${(c.absorptionScore ?? c.absorption).toFixed(0)} · danger ${c.danger.toFixed(0)}.`,
+    c.evidence && c.evidence.length
+      ? `Evidence: ${c.evidence.join(" · ")}`
+      : "Structural formation developing.",
+    c.vetoes && c.vetoes.length
+      ? `Vetoes: ${c.vetoes.join(" · ")}`
+      : "All Sentinel structural rules satisfied.",
+    `${c.supportCount}/6 V3 independent dimensions support this structure. ${c.ripe && !c.confirmed ? "RIPE is not CONFIRMED." : ""}`.trim(),
+    `Read as observable tick structure only — no hidden order flow, no manipulation claims.`,
   ];
 }

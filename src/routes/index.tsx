@@ -40,19 +40,19 @@ export const Route = createFileRoute("/")({
 });
 
 const TABS = [
-  ["RADAR", "Opportunity radar"],
-  ["LEDGER", "Event ledger"],
-  ["LIQUIDITY", "Liquidity"],
-  ["PSYCHOLOGY", "Psychology"],
-  ["DANGER", "Danger lab"],
-  ["MATRIX", "Contract matrix"],
-  ["RESEARCH", "Research core"],
+  ["RADAR", "Active Liquidity Zones"],
+  ["LEDGER", "Formation Ledger"],
+  ["LIQUIDITY", "Liquidity Structure"],
+  ["PSYCHOLOGY", "Sentinel Psychology"],
+  ["DANGER", "Danger Lab"],
+  ["MATRIX", "Contract Matrix"],
+  ["RESEARCH", "Research Core"],
 ] as const;
 
 type Tab = (typeof TABS)[number][0];
 
 function Console() {
-  const { snapshot, markets, opportunities, cycleMs } = useIntelligence();
+  const { snapshot, markets, opportunities, zones, cycleMs } = useIntelligence();
   const observations = useJournal();
   const [selected, setSelected] = useState("R_75");
   const [tab, setTab] = useState<Tab>("RADAR");
@@ -235,9 +235,9 @@ function Console() {
           ) : null}
 
           {tab === "RADAR" && (
-            <RadarView snap={opportunities} onSelectMarket={setSelected} />
+            <RadarView zones={zones} snap={opportunities} onSelectMarket={setSelected} />
           )}
-          {tab === "LEDGER" && <LedgerView snap={opportunities} />}
+          {tab === "LEDGER" && <LedgerView zones={zones} snap={opportunities} />}
 
           {tab === "RADAR" || tab === "LEDGER" ? null : !analysis ? (
             <div className="panel flex h-64 items-center justify-center text-sm text-muted-foreground">

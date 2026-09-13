@@ -2,7 +2,11 @@ import { Fragment } from "react";
 
 import { cn } from "@/lib/utils";
 import { LIQUIDITY_LAWS, ANALYSIS_VERSION } from "@/lib/liquidity/universe";
-import { makeExplanation, type ContractAnalysis, type MarketAnalysis } from "@/lib/liquidity/engine";
+import {
+  makeExplanation,
+  type ContractAnalysis,
+  type MarketAnalysis,
+} from "@/lib/liquidity/engine";
 import type { ComputedMarket } from "@/lib/liquidity/useIntelligence";
 import type { Observation } from "@/lib/liquidity/journal";
 
@@ -43,9 +47,7 @@ function LifecycleTrack({ contract }: { contract: ContractAnalysis }) {
         ))}
       </div>
       {offTrack ? (
-        <p className="mono-label mt-1.5 text-conflict">
-          Off-lifecycle · {contract.state}
-        </p>
+        <p className="mono-label mt-1.5 text-conflict">Off-lifecycle · {contract.state}</p>
       ) : null}
     </div>
   );
@@ -164,6 +166,30 @@ export function LiquidityView({
                   </div>
                 </div>
               ))}
+              {focus.evidence && focus.evidence.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {focus.evidence.map((ev, i) => (
+                    <span
+                      key={i}
+                      className="inline-flex items-center rounded border border-calm/30 bg-calm/10 px-1.5 py-0.5 text-[10px] text-calm"
+                    >
+                      {ev}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {focus.vetoes && focus.vetoes.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {focus.vetoes.map((vt, i) => (
+                    <span
+                      key={i}
+                      className="inline-flex items-center rounded border border-danger/30 bg-danger/10 px-1.5 py-0.5 text-[10px] text-danger"
+                    >
+                      Veto: {vt}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
             <div>
               {makeExplanation(focus, a).map((line, i) => (
@@ -182,6 +208,9 @@ export function LiquidityView({
           <Metric label="EVEN · 20" value={a.even20} suffix="%" />
           <Metric label="Normalized entropy" value={a.entropy} suffix="%" />
           <Metric label="Entropy shock" value={a.entropyShock} />
+          <Metric label="Entropy velocity" value={a.entropyVelocity} digits={3} />
+          <Metric label="Entropy acceleration" value={a.entropyAcceleration} digits={3} />
+          <Metric label="Distribution JSD (500)" value={a.jsd500 * 100} digits={2} suffix="%" />
           <Metric label="Fluctuation" value={a.fluctuation} tone="caution" />
           <Metric label="Anomaly" value={a.anomaly} tone="danger" />
           <Metric label="Zone momentum" value={a.zoneMomentum} />
@@ -199,34 +228,235 @@ export function LiquidityView({
 /* ------------------------------------------------------------------ */
 
 export function PsychologyView({ a }: { a: MarketAnalysis }) {
+  const p = a.sentinelPsychology ?? {
+    window: 1000,
+    sampleSize: a.sample ?? 1000,
+    green: 0,
+    secondGreen: 1,
+    red: 9,
+    secondRed: 8,
+    purple: null,
+    pct: a.f1000 ?? Array(10).fill(0.1),
+    pressure: Array(10).fill(0),
+    byFreq: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+    valid: false,
+    outcome: "WATCH" as const,
+    reasons: [],
+  };
+  const reasons = Array.isArray(p.reasons) ? p.reasons : [];
+  const outcome = p.outcome ?? "WATCH";
+  const outcomeTone =
+    outcome === "ACCEPT"
+      ? "bg-calm/15 text-calm border-calm/30"
+      : outcome === "WATCH"
+        ? "bg-caution/15 text-caution border-caution/30"
+        : "bg-danger/15 text-danger border-danger/30";
+
   return (
     <div className="grid gap-3 lg:grid-cols-2">
-      <Panel title="10-digit psychology" subtitle="50-tick distribution vs 1000-tick baseline">
-        <div className="grid grid-cols-10 gap-1">
-          {a.psychology.freq.map((v, i) => {
+      {/* V3 Authoritative 1000-tick Sentinel Psychology */}
+      <Panel
+        title="Authoritative 1000-Tick Sentinel Psychology"
+        subtitle={`1000-tick canonical sample (${p.sampleSize ?? a.sample ?? 1000} ticks) · 5-Tier Sentinel Hierarchy`}
+        className="lg:col-span-2"
+        actions={
+          <span
+            className={cn(
+              "inline-flex items-center rounded border px-2.5 py-0.5 font-mono text-[11px] font-semibold tracking-wider",
+              outcomeTone,
+            )}
+          >
+            STATUS: {outcome}
+          </span>
+        }
+      >
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+          {/* Green */}
+          <div className="flex flex-col rounded-md border border-emerald-500/40 bg-emerald-500/10 p-2.5">
+            <span className="mono-label text-[9px] uppercase tracking-wider text-emerald-400">
+              Green · Highest
+            </span>
+            <div className="mt-1 flex items-baseline justify-between">
+              <strong className="tabular text-2xl font-bold text-emerald-300">d{p.green}</strong>
+              <span className="tabular text-xs text-emerald-400/90">
+                {((a.f1000[p.green] ?? 0) * 100).toFixed(1)}%
+              </span>
+            </div>
+            <span className="mt-1 text-[10px] text-muted-foreground">
+              Peak appearance over 1000 ticks
+            </span>
+          </div>
+
+          {/* 2nd Green */}
+          <div className="flex flex-col rounded-md border border-teal-500/40 bg-teal-500/10 p-2.5">
+            <span className="mono-label text-[9px] uppercase tracking-wider text-teal-400">
+              2nd Green · Runner-up
+            </span>
+            <div className="mt-1 flex items-baseline justify-between">
+              <strong className="tabular text-2xl font-bold text-teal-300">d{p.secondGreen}</strong>
+              <span className="tabular text-xs text-teal-400/90">
+                {((a.f1000[p.secondGreen] ?? 0) * 100).toFixed(1)}%
+              </span>
+            </div>
+            <span className="mt-1 text-[10px] text-muted-foreground">
+              Second-highest appearance
+            </span>
+          </div>
+
+          {/* Red */}
+          <div className="flex flex-col rounded-md border border-rose-500/40 bg-rose-500/10 p-2.5">
+            <span className="mono-label text-[9px] uppercase tracking-wider text-rose-400">
+              Red · Lowest
+            </span>
+            <div className="mt-1 flex items-baseline justify-between">
+              <strong className="tabular text-2xl font-bold text-rose-300">d{p.red}</strong>
+              <span className="tabular text-xs text-rose-400/90">
+                {((a.f1000[p.red] ?? 0) * 100).toFixed(1)}%
+              </span>
+            </div>
+            <span className="mt-1 text-[10px] text-muted-foreground">
+              Primary reservoir / minimum appearance
+            </span>
+          </div>
+
+          {/* 2nd Red */}
+          <div className="flex flex-col rounded-md border border-orange-500/40 bg-orange-500/10 p-2.5">
+            <span className="mono-label text-[9px] uppercase tracking-wider text-orange-400">
+              2nd Red · Sub-reservoir
+            </span>
+            <div className="mt-1 flex items-baseline justify-between">
+              <strong className="tabular text-2xl font-bold text-orange-300">d{p.secondRed}</strong>
+              <span className="tabular text-xs text-orange-400/90">
+                {((a.f1000[p.secondRed] ?? 0) * 100).toFixed(1)}%
+              </span>
+            </div>
+            <span className="mt-1 text-[10px] text-muted-foreground">Second-lowest appearance</span>
+          </div>
+
+          {/* Purple */}
+          <div className="flex flex-col rounded-md border border-purple-500/40 bg-purple-500/10 p-2.5">
+            <span className="mono-label text-[9px] uppercase tracking-wider text-purple-400">
+              Purple · Velocity
+            </span>
+            <div className="mt-1 flex items-baseline justify-between">
+              <strong className="tabular text-2xl font-bold text-purple-300">
+                {p.purple !== null ? `d${p.purple}` : "—"}
+              </strong>
+              {p.purple !== null && (
+                <span className="tabular text-xs text-purple-400/90">
+                  {((a.f20[p.purple] ?? 0) * 100).toFixed(1)}%
+                </span>
+              )}
+            </div>
+            <span className="mt-1 text-[10px] text-muted-foreground">
+              Fastest-growing positive pressure
+            </span>
+          </div>
+        </div>
+
+        {reasons.length > 0 && (
+          <div className="mt-3 rounded border border-border/70 bg-surface-raised/60 p-2.5">
+            <div className="mono-label mb-1 text-[10px] text-muted-foreground">
+              Sentinel Rule Evaluation
+            </div>
+            <ul className="space-y-1 text-[11px] text-muted-foreground">
+              {reasons.map((r, idx) => (
+                <li key={idx} className="flex items-start gap-1.5">
+                  <span className="text-accent">•</span>
+                  <span>{r}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </Panel>
+
+      <Panel
+        title="10-digit distribution & dynamics"
+        subtitle="1000-tick authoritative baseline vs recent windows"
+      >
+        <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-10">
+          {Array.from({ length: 10 }).map((_, i) => {
+            const v1000 = a.f1000[i] ?? 0;
+            const v50 = a.f50[i] ?? 0;
             const m = a.digitMomentum[i] ?? 0;
+            const temp = a.temporal[i];
+            const isGreen = p.green === i;
+            const isSecondGreen = p.secondGreen === i;
+            const isRed = p.red === i;
+            const isSecondRed = p.secondRed === i;
+            const isPurple = p.purple === i;
+
+            const badge = isGreen
+              ? "GRN"
+              : isSecondGreen
+                ? "2GR"
+                : isRed
+                  ? "RED"
+                  : isSecondRed
+                    ? "2RD"
+                    : isPurple
+                      ? "PUR"
+                      : null;
+
+            const borderClass = isGreen
+              ? "border-emerald-500/60 bg-emerald-500/10"
+              : isSecondGreen
+                ? "border-teal-500/50 bg-teal-500/10"
+                : isRed
+                  ? "border-rose-500/60 bg-rose-500/10"
+                  : isSecondRed
+                    ? "border-orange-500/50 bg-orange-500/10"
+                    : isPurple
+                      ? "border-purple-500/60 bg-purple-500/10"
+                      : "border-border bg-surface-raised";
+
             return (
               <div
                 key={i}
-                className="flex flex-col items-center rounded border border-border bg-surface-raised p-1"
+                className={cn(
+                  "flex flex-col items-center rounded border p-1 transition-all",
+                  borderClass,
+                )}
               >
-                <b className="tabular text-sm">{i}</b>
-                <span className="tabular text-[10px] text-muted-foreground">
-                  {(v * 100).toFixed(1)}
+                <div className="flex w-full items-center justify-between px-0.5">
+                  <b className="tabular text-sm">{i}</b>
+                  {badge ? (
+                    <span className="font-mono text-[8px] font-bold text-accent">{badge}</span>
+                  ) : null}
+                </div>
+                <span className="tabular text-[10px] text-muted-foreground" title="1000-tick share">
+                  {(v1000 * 100).toFixed(1)}%
                 </span>
                 <em
                   className={cn(
                     "tabular text-[10px] not-italic",
                     m >= 0 ? "text-calm" : "text-danger",
                   )}
+                  title="Shift against 1000-tick baseline"
                 >
                   {m >= 0 ? "+" : ""}
                   {m.toFixed(1)}
                 </em>
+                {temp && (
+                  <span className="tabular text-[9px] text-muted-foreground/80" title="Slope">
+                    slp {(temp.slope ?? temp.slope20_60 ?? 0) >= 0 ? "+" : ""}
+                    {(temp.slope ?? temp.slope20_60 ?? 0).toFixed(2)}
+                  </span>
+                )}
                 <div className="mt-1 h-8 w-full rounded-sm bg-muted">
                   <div
-                    className="w-full rounded-sm bg-signal/70"
-                    style={{ height: `${Math.min(100, v * 400)}%`, marginTop: "auto" }}
+                    className={cn(
+                      "w-full rounded-sm",
+                      isGreen
+                        ? "bg-emerald-500/80"
+                        : isRed
+                          ? "bg-rose-500/80"
+                          : isPurple
+                            ? "bg-purple-500/80"
+                            : "bg-signal/70",
+                    )}
+                    style={{ height: `${Math.min(100, v50 * 400)}%`, marginTop: "auto" }}
                   />
                 </div>
               </div>
@@ -234,7 +464,8 @@ export function PsychologyView({ a }: { a: MarketAnalysis }) {
           })}
         </div>
         <Note>
-          Momentum is the percentage-point shift of each digit against its own long baseline.
+          Authoritative 1000-tick sample defines Green, 2nd Green, Red, and 2nd Red. Purple captures
+          positive velocity.
         </Note>
       </Panel>
 
@@ -408,9 +639,7 @@ export function DangerView({ a }: { a: MarketAnalysis }) {
           <Metric label="HMM high-state" value={a.hmm.high * 100} suffix="%" />
           <Metric label="HMM confidence" value={a.hmm.confidence} />
           <Metric label="Transition stability" value={a.transitionStability} />
-          <Note>
-            A regime shift raises conflict and danger until the new structure stabilizes.
-          </Note>
+          <Note>A regime shift raises conflict and danger until the new structure stabilizes.</Note>
         </Panel>
       </div>
     </div>
@@ -480,7 +709,11 @@ export function MatrixView({
                   );
                 })}
                 <td className="py-1">
-                  {m.analysis ? <StateTag state={m.analysis.top.state} /> : <StateTag state="WAITING" />}
+                  {m.analysis ? (
+                    <StateTag state={m.analysis.top.state} />
+                  ) : (
+                    <StateTag state="WAITING" />
+                  )}
                 </td>
               </tr>
             ))}
@@ -520,7 +753,11 @@ export function ResearchView({
           <Metric label="Entropy shock" value={a.entropyShock} />
         </Panel>
 
-        <Panel title="Markov transition engine" subtitle="10×10 conditional structure" className="lg:col-span-2">
+        <Panel
+          title="Markov transition engine"
+          subtitle="10×10 conditional structure"
+          className="lg:col-span-2"
+        >
           <div className="grid grid-cols-[auto_repeat(10,minmax(0,1fr))] gap-px text-[9px]">
             <div />
             {Array.from({ length: 10 }, (_, j) => (
@@ -530,9 +767,7 @@ export function ResearchView({
             ))}
             {a.transition.map((row, i) => (
               <Fragment key={`r${i}`}>
-                <div className="mono-label pr-1 text-right">
-                  {i}
-                </div>
+                <div className="mono-label pr-1 text-right">{i}</div>
                 {row.map((v, j) => (
                   <div
                     key={`${i}-${j}`}
@@ -597,7 +832,9 @@ export function ResearchView({
             </div>
           }
         >
-          <div className="mono-label mb-2 break-all">Current observation ID · {a.observationId}</div>
+          <div className="mono-label mb-2 break-all">
+            Current observation ID · {a.observationId}
+          </div>
           <div className="max-h-[320px] overflow-auto">
             <table className="w-full min-w-[640px] text-[11px]">
               <thead className="sticky top-0 bg-surface">

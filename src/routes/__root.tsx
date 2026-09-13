@@ -80,14 +80,12 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { title: "Deriv Liquidity Intelligence" },
       {
         name: "description",
-        content:
-          "Live observable liquidity-formation research across 15 Deriv synthetic markets.",
+        content: "Live observable liquidity-formation research across 15 Deriv synthetic markets.",
       },
       { property: "og:title", content: "Deriv Liquidity Intelligence" },
       {
         property: "og:description",
-        content:
-          "Live observable liquidity-formation research across 15 Deriv synthetic markets.",
+        content: "Live observable liquidity-formation research across 15 Deriv synthetic markets.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },

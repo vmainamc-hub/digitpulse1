@@ -15,7 +15,8 @@ import type { Tick } from "./engine";
 
 export type ConnectionState = "IDLE" | "CONNECTING" | "LIVE" | "DEGRADED" | "RECONNECTING";
 export type MarketStatus = "WAITING" | "SEEDING" | "LIVE" | "STALE" | "UNAVAILABLE";
-export type FeedHealth = "LIVE" | "ANALYSIS LAG" | "FEED STALE" | "ENGINE BUSY" | "BACKEND DEGRADED";
+export type FeedHealth =
+  "LIVE" | "ANALYSIS LAG" | "FEED STALE" | "ENGINE BUSY" | "BACKEND DEGRADED";
 
 export interface MarketState extends MarketDef {
   history: Tick[];
@@ -103,11 +104,13 @@ class DerivFeed {
   }
 
   private health(markets: MarketState[]): FeedHealth {
-    if (this.connection === "DEGRADED" || this.connection === "RECONNECTING") return "BACKEND DEGRADED";
+    if (this.connection === "DEGRADED" || this.connection === "RECONNECTING")
+      return "BACKEND DEGRADED";
     if (this.engineBusy) return "ENGINE BUSY";
     const alive = markets.filter((m) => m.status === "LIVE").length;
     if (!alive) return "FEED STALE";
-    if (markets.filter((m) => m.status === "STALE").length > markets.length / 2) return "FEED STALE";
+    if (markets.filter((m) => m.status === "STALE").length > markets.length / 2)
+      return "FEED STALE";
     if (this.analysisLagMs > 2_500) return "ANALYSIS LAG";
     return "LIVE";
   }
@@ -236,10 +239,18 @@ class DerivFeed {
 
     socket.onopen = () => {
       this.setConnection("LIVE");
-      this.send(socket, { active_symbols: "brief", product_type: "basic" }, { kind: "ACTIVE_SYMBOLS", at: Date.now() });
+      this.send(
+        socket,
+        { active_symbols: "brief", product_type: "basic" },
+        { kind: "ACTIVE_SYMBOLS", at: Date.now() },
+      );
       this.requestHistory(socket);
       for (const m of UNIVERSE) {
-        this.send(socket, { ticks: m.symbol, subscribe: 1 }, { kind: "SUBSCRIBE", symbol: m.symbol, at: Date.now() });
+        this.send(
+          socket,
+          { ticks: m.symbol, subscribe: 1 },
+          { kind: "SUBSCRIBE", symbol: m.symbol, at: Date.now() },
+        );
       }
       for (const s of this.states.values()) if (s.status === "WAITING") s.status = "SEEDING";
       this.dirty = true;
@@ -300,7 +311,9 @@ class DerivFeed {
         const lastBootstrapTime = bootstrap[bootstrap.length - 1]?.t ?? 0;
         const newer = state.history.filter((t) => t.t > lastBootstrapTime);
         const merged = [...bootstrap, ...newer].slice(-HISTORY_CAP);
-        const advanced = merged.length !== state.history.length || (merged[merged.length - 1]?.t ?? 0) !== (state.history[state.history.length - 1]?.t ?? 0);
+        const advanced =
+          merged.length !== state.history.length ||
+          (merged[merged.length - 1]?.t ?? 0) !== (state.history[state.history.length - 1]?.t ?? 0);
         state.history = merged;
         const latest = merged[merged.length - 1];
         state.last = latest?.q ?? null;
@@ -321,7 +334,9 @@ class DerivFeed {
         if (!Number.isFinite(q)) return;
         const epoch = Number(tick.epoch ?? 0);
         if (state.history[state.history.length - 1]?.t === epoch) return;
-        state.history = [...state.history, { q, d: lastDigit(tick.quote ?? q), t: epoch }].slice(-HISTORY_CAP);
+        state.history = [...state.history, { q, d: lastDigit(tick.quote ?? q), t: epoch }].slice(
+          -HISTORY_CAP,
+        );
         state.last = q;
         state.epoch = epoch;
         state.status = "LIVE";

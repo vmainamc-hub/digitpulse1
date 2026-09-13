@@ -15,33 +15,51 @@
 
 import { clamp, mean } from "./math";
 import type { ContractAnalysis, MarketAnalysis } from "./engine";
+import type {
+  DigitTemporal,
+  LiquidityOpportunity,
+  Psychology1000,
+  TransitionEvidence,
+} from "./liquidity-v3";
 
 export const PHASES = [
+  "NO_LIQUIDITY",
   "ABSENT",
   "FORMING",
   "BUILDING",
   "MATURE",
+  "EXHAUSTION_WATCH",
+  "EXHAUSTION_CONFIRMED",
+  "DELIVERY",
+  "DELIVERY_ACCELERATING",
   "ABSORBING",
   "EXHAUSTING",
-  "RIPE",
+  "RELEASE_WATCH",
   "RELEASE",
   "DIRECTIONAL MOVE",
+  "RIPE",
   "CONFIRMED",
 ] as const;
 
 export type Phase = (typeof PHASES)[number] | "CONFLICTED" | "BLOCKED" | "INVALIDATED";
 
 const PHASE_RANK: Record<string, number> = {
+  NO_LIQUIDITY: 0,
   ABSENT: 0,
   FORMING: 1,
   BUILDING: 2,
   MATURE: 3,
-  ABSORBING: 4,
-  EXHAUSTING: 5,
-  RIPE: 6,
-  RELEASE: 7,
-  "DIRECTIONAL MOVE": 8,
-  CONFIRMED: 9,
+  EXHAUSTION_WATCH: 4,
+  EXHAUSTION_CONFIRMED: 5,
+  DELIVERY: 6,
+  DELIVERY_ACCELERATING: 7,
+  ABSORBING: 8,
+  EXHAUSTING: 9,
+  RELEASE_WATCH: 10,
+  RELEASE: 11,
+  "DIRECTIONAL MOVE": 12,
+  RIPE: 13,
+  CONFIRMED: 14,
   CONFLICTED: -1,
   BLOCKED: -2,
   INVALIDATED: -3,
@@ -152,6 +170,22 @@ export interface Opportunity {
   integrity: number;
   supportCount: number;
 
+  reservoirScore?: number;
+  exhaustionScore?: number;
+  deliveryScore?: number;
+  migrationScore?: number;
+  absorptionScore?: number;
+  confirmationScore?: number;
+  conflictScore?: number;
+  evidence?: string[];
+  vetoes?: string[];
+  psychology1000?: Psychology1000;
+  temporal?: Record<number, DigitTemporal>;
+  transitions?: TransitionEvidence[];
+  entropyVelocity?: number;
+  entropyAcceleration?: number;
+  jsdScore?: number;
+
   phase: Phase;
   previousPhase: Phase;
   phaseSince: number;
@@ -210,7 +244,10 @@ function ids(symbol: string, contractId: string, at: number) {
   const d = new Date(at);
   const stamp = `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, "0")}${String(
     d.getUTCDate(),
-  ).padStart(2, "0")}-${String(d.getUTCHours()).padStart(2, "0")}${String(d.getUTCMinutes()).padStart(2, "0")}`;
+  ).padStart(
+    2,
+    "0",
+  )}-${String(d.getUTCHours()).padStart(2, "0")}${String(d.getUTCMinutes()).padStart(2, "0")}`;
   return `OPP-${symbol}-${contractId}-${stamp}`;
 }
 
@@ -251,7 +288,14 @@ export class OpportunityStore {
 
   snapshot: OpportunitySnapshot = EMPTY_SNAPSHOT;
 
-  private log(o: Opportunity, type: EventType, evidence: string, metric: string, prev: number | null, next: number | null) {
+  private log(
+    o: Opportunity,
+    type: EventType,
+    evidence: string,
+    metric: string,
+    prev: number | null,
+    next: number | null,
+  ) {
     const ev: OpportunityEvent = {
       id: `EV-${++this.eventSeq}`,
       at: Date.now(),
@@ -300,9 +344,15 @@ export class OpportunityStore {
 
   private measure(a: MarketAnalysis, c: ContractAnalysis) {
     const concentration = clamp(Math.abs(c.winShare - 50) * 2);
-    const accumulation = clamp(c.creation * 0.4 + concentration * 0.3 + Math.abs(c.drift) * 2.2 + c.run * 4);
+    const accumulation = clamp(
+      c.creation * 0.4 + concentration * 0.3 + Math.abs(c.drift) * 2.2 + c.run * 4,
+    );
     const integrity = clamp(
-      100 - (c.conflict * 0.4 + a.anomaly * 0.2 + Math.max(0, a.changePoint - 40) * 0.3 + c.danger * 0.15),
+      100 -
+        (c.conflict * 0.4 +
+          a.anomaly * 0.2 +
+          Math.max(0, a.changePoint - 40) * 0.3 +
+          c.danger * 0.15),
     );
     return { concentration, accumulation, integrity };
   }
@@ -370,6 +420,22 @@ export class OpportunityStore {
       confirmation: c.confirmation,
       integrity: m.integrity,
       supportCount: c.supportCount,
+
+      reservoirScore: c.reservoirScore ?? c.creation,
+      exhaustionScore: c.exhaustionScore ?? c.exhaustion,
+      deliveryScore: c.deliveryScore ?? c.release,
+      migrationScore: c.migrationScore ?? 0,
+      absorptionScore: c.absorptionScore ?? c.absorption,
+      confirmationScore: c.confirmationScore ?? c.confirmation,
+      conflictScore: c.conflictScore ?? c.conflict,
+      evidence: c.evidence ?? [],
+      vetoes: c.vetoes ?? [],
+      psychology1000: c.psychology1000,
+      temporal: c.temporal,
+      transitions: c.transitions,
+      entropyVelocity: c.entropyVelocity ?? 0,
+      entropyAcceleration: c.entropyAcceleration ?? 0,
+      jsdScore: c.jsdScore ?? 0,
 
       phase: "FORMING",
       previousPhase: "ABSENT",
@@ -446,6 +512,22 @@ export class OpportunityStore {
     o.integrity = m.integrity;
     o.supportCount = c.supportCount;
 
+    o.reservoirScore = c.reservoirScore ?? c.creation;
+    o.exhaustionScore = c.exhaustionScore ?? c.exhaustion;
+    o.deliveryScore = c.deliveryScore ?? c.release;
+    o.migrationScore = c.migrationScore ?? 0;
+    o.absorptionScore = c.absorptionScore ?? c.absorption;
+    o.confirmationScore = c.confirmationScore ?? c.confirmation;
+    o.conflictScore = c.conflictScore ?? c.conflict;
+    o.evidence = c.evidence ?? [];
+    o.vetoes = c.vetoes ?? [];
+    o.psychology1000 = c.psychology1000;
+    o.temporal = c.temporal;
+    o.transitions = c.transitions;
+    o.entropyVelocity = c.entropyVelocity ?? 0;
+    o.entropyAcceleration = c.entropyAcceleration ?? 0;
+    o.jsdScore = c.jsdScore ?? 0;
+
     if (advanced) {
       push(o.series.maturity, c.maturity);
       push(o.series.creation, c.creation);
@@ -482,28 +564,106 @@ export class OpportunityStore {
     o: Opportunity,
     a: MarketAnalysis,
     c: ContractAnalysis,
-    prev: { pressure: number; absorption: number; exhaustion: number; release: number; concentration: number; regime: string; persistence: number },
+    prev: {
+      pressure: number;
+      absorption: number;
+      exhaustion: number;
+      release: number;
+      concentration: number;
+      regime: string;
+      persistence: number;
+    },
   ) {
     if (o.concentration - prev.concentration >= 10)
-      this.log(o, "CONCENTRATION INCREASED", `${o.kind === "OVER" ? "High" : "Low"}-side digit concentration rising.`, "concentration", prev.concentration, o.concentration);
+      this.log(
+        o,
+        "CONCENTRATION INCREASED",
+        `${o.kind === "OVER" ? "High" : "Low"}-side digit concentration rising.`,
+        "concentration",
+        prev.concentration,
+        o.concentration,
+      );
     if (o.boundaryPressure >= 60 && prev.pressure < o.pressure && o.pressure - prev.pressure >= 6)
-      this.log(o, "BOUNDARY PRESSURE DETECTED", `Boundary digit activity at ${c.barrier}.`, "boundaryPressure", prev.pressure, o.pressure);
+      this.log(
+        o,
+        "BOUNDARY PRESSURE DETECTED",
+        `Boundary digit activity at ${c.barrier}.`,
+        "boundaryPressure",
+        prev.pressure,
+        o.pressure,
+      );
     if (o.persistence - prev.persistence >= 12)
-      this.log(o, "PERSISTENCE INCREASED", `Winning-side run extended to ${c.run}.`, "persistence", prev.persistence, o.persistence);
+      this.log(
+        o,
+        "PERSISTENCE INCREASED",
+        `Winning-side run extended to ${c.run}.`,
+        "persistence",
+        prev.persistence,
+        o.persistence,
+      );
     if ((o.acceleration["pressure"] ?? 0) > 0.6)
-      this.log(o, "PRESSURE ACCELERATING", "Digit pressure is accelerating, not merely elevated.", "pressure accel", prev.pressure, o.pressure);
+      this.log(
+        o,
+        "PRESSURE ACCELERATING",
+        "Digit pressure is accelerating, not merely elevated.",
+        "pressure accel",
+        prev.pressure,
+        o.pressure,
+      );
     if (o.absorption >= 55 && prev.absorption < 55)
-      this.log(o, "ABSORPTION DETECTED", "Opposing-side pressure is being absorbed.", "absorption", prev.absorption, o.absorption);
+      this.log(
+        o,
+        "ABSORPTION DETECTED",
+        "Opposing-side pressure is being absorbed.",
+        "absorption",
+        prev.absorption,
+        o.absorption,
+      );
     if ((o.velocity["exhaustion"] ?? 0) > 0.8 && o.exhaustion >= 55)
-      this.log(o, "EXHAUSTION ACCELERATING", "Opposing structure is exhausting.", "exhaustion", prev.exhaustion, o.exhaustion);
+      this.log(
+        o,
+        "EXHAUSTION ACCELERATING",
+        "Opposing structure is exhausting.",
+        "exhaustion",
+        prev.exhaustion,
+        o.exhaustion,
+      );
     if (a.regime.state !== prev.regime)
-      this.log(o, "REGIME CHANGE DETECTED", `Regime ${prev.regime} → ${a.regime.state}.`, "regime change", null, a.regime.change);
+      this.log(
+        o,
+        "REGIME CHANGE DETECTED",
+        `Regime ${prev.regime} → ${a.regime.state}.`,
+        "regime change",
+        null,
+        a.regime.change,
+      );
     if (a.sweep.active && a.sweep.intensity >= 55 && (o.velocity["release"] ?? 0) > 0)
-      this.log(o, "SWEEP SEQUENCE OBSERVED", `${a.sweep.side} boundary burst with opposite-zone reversion.`, "sweep", null, a.sweep.intensity);
+      this.log(
+        o,
+        "SWEEP SEQUENCE OBSERVED",
+        `${a.sweep.side} boundary burst with opposite-zone reversion.`,
+        "sweep",
+        null,
+        a.sweep.intensity,
+      );
     if (o.releaseProximity >= 60 && prev.release < 60)
-      this.log(o, "RELEASE STRUCTURE DEVELOPING", "Maturation plus exhaustion with observed structural change.", "release", prev.release, o.releaseProximity);
+      this.log(
+        o,
+        "RELEASE STRUCTURE DEVELOPING",
+        "Maturation plus exhaustion with observed structural change.",
+        "release",
+        prev.release,
+        o.releaseProximity,
+      );
     if (a.changePoint >= 70 && (o.velocity["integrity"] ?? 0) < 0)
-      this.log(o, "STRUCTURAL BREAK DETECTED", "Change-point detector fired against the structure.", "changePoint", null, a.changePoint);
+      this.log(
+        o,
+        "STRUCTURAL BREAK DETECTED",
+        "Change-point detector fired against the structure.",
+        "changePoint",
+        null,
+        a.changePoint,
+      );
   }
 
   /** PHASE 5 — lifecycle state machine with hysteresis and dwell time. */
@@ -512,7 +672,8 @@ export class OpportunityStore {
     if (raw === o.phase) return;
 
     const forward = phaseRank(raw) > phaseRank(o.phase);
-    const terminalRaw = raw === "CONFIRMED" || raw === "BLOCKED" || raw === "INVALIDATED" || raw === "CONFLICTED";
+    const terminalRaw =
+      raw === "CONFIRMED" || raw === "BLOCKED" || raw === "INVALIDATED" || raw === "CONFLICTED";
 
     if (!forward && !terminalRaw) {
       // Backward movement demands dwell time AND material deterioration —
@@ -521,7 +682,10 @@ export class OpportunityStore {
       const base = o.series;
       const peakMaturity = Math.max(...base.maturity.slice(-40), o.maturity);
       const deterioration =
-        peakMaturity - o.maturity + Math.max(0, 60 - o.integrity) * 0.4 + Math.max(0, o.danger - 50) * 0.3;
+        peakMaturity -
+        o.maturity +
+        Math.max(0, 60 - o.integrity) * 0.4 +
+        Math.max(0, o.danger - 50) * 0.3;
       if (deterioration < DETERIORATION_THRESHOLD) return;
     }
     if (forward && o.phaseDurationTicks < 2 && phaseRank(raw) - phaseRank(o.phase) > 1) return;
@@ -543,11 +707,32 @@ export class OpportunityStore {
       this.invalidated++;
       this.log(o, "INVALIDATED", o.invalidationReason, "creation", null, c.creation);
     } else if (raw === "BLOCKED") {
-      this.log(o, "BLOCKED", `Danger ${c.danger.toFixed(0)} / conflict ${c.conflict.toFixed(0)} blocks this structure.`, "danger", null, c.danger);
+      this.log(
+        o,
+        "BLOCKED",
+        `Danger ${c.danger.toFixed(0)} / conflict ${c.conflict.toFixed(0)} blocks this structure.`,
+        "danger",
+        null,
+        c.danger,
+      );
     } else if (raw === "CONFLICTED") {
-      this.log(o, "CONFLICTED", "Dimensions disagree materially — no direction is forced.", "conflict", null, c.conflict);
+      this.log(
+        o,
+        "CONFLICTED",
+        "Dimensions disagree materially — no direction is forced.",
+        "conflict",
+        null,
+        c.conflict,
+      );
     } else if (raw === "RIPE" || raw === "RELEASE" || raw === "DIRECTIONAL MOVE") {
-      this.log(o, "CONFIRMATION WATCH", "RIPE is not CONFIRMED — release evidence under observation.", "release", null, c.release);
+      this.log(
+        o,
+        "CONFIRMATION WATCH",
+        "RIPE is not CONFIRMED — release evidence under observation.",
+        "release",
+        null,
+        c.release,
+      );
     } else {
       this.log(
         o,
@@ -561,12 +746,22 @@ export class OpportunityStore {
   }
 
   private rawPhase(o: Opportunity, c: ContractAnalysis): Phase {
-    if (!c.law || (c.creation < INVALIDATION_FLOOR && o.ageTicks > MIN_DWELL_TICKS)) return "INVALIDATED";
+    if (c.state) {
+      if (c.state === "BLOCKED") return "BLOCKED";
+      if (c.state === "CONFLICTED") return "CONFLICTED";
+      if (c.state === "CONFIRMED") return "CONFIRMED";
+      if (c.state === "RIPE") return "RIPE";
+      if (c.state === "NO_LIQUIDITY") return "NO_LIQUIDITY";
+      if (c.state in PHASE_RANK) return c.state as Phase;
+    }
+    if (!c.law || (c.creation < INVALIDATION_FLOOR && o.ageTicks > MIN_DWELL_TICKS))
+      return "INVALIDATED";
     if (c.danger >= 78 || c.conflict >= 82) return "BLOCKED";
     if (c.confirmed) return "CONFIRMED";
     // LAW — conflicting evidence is never forced into a direction.
     if (c.conflict >= 60 && o.integrity < 55) return "CONFLICTED";
-    if (c.release >= 78 && c.maturity >= 62 && (o.velocity["release"] ?? 0) > 0.2) return "DIRECTIONAL MOVE";
+    if (c.release >= 78 && c.maturity >= 62 && (o.velocity["release"] ?? 0) > 0.2)
+      return "DIRECTIONAL MOVE";
     if (c.release >= 72 && c.maturity >= 62) return "RELEASE";
     if (c.ripe) return "RIPE";
     if (c.exhaustion >= 68) return "EXHAUSTING";
@@ -596,16 +791,22 @@ export class OpportunityStore {
       ageWeight * 100 * 0.04 -
       o.danger * 0.18 -
       o.conflict * 0.1;
-    const penalty = o.phase === "BLOCKED" || o.phase === "INVALIDATED" ? 45 : o.phase === "CONFLICTED" ? 18 : 0;
+    const penalty =
+      o.phase === "BLOCKED" || o.phase === "INVALIDATED" ? 45 : o.phase === "CONFLICTED" ? 18 : 0;
     return clamp(raw - penalty);
   }
 
   /** Retire terminal / abandoned identities so memory stays bounded. */
   private prune(activeKeys: Set<string>, now: number) {
     for (const [key, o] of this.live) {
-      const stale = now - (o.lastStructuralChange?.at ?? o.bornAt) > 10 * 60_000 && o.phase === "ABSENT";
+      const stale =
+        now - (o.lastStructuralChange?.at ?? o.bornAt) > 10 * 60_000 && o.phase === "ABSENT";
       const gone = !activeKeys.has(key);
-      if ((o.terminal && now - o.phaseSince > 3 * 60_000) || stale || (gone && now - o.bornAt > 5 * 60_000)) {
+      if (
+        (o.terminal && now - o.phaseSince > 3 * 60_000) ||
+        stale ||
+        (gone && now - o.bornAt > 5 * 60_000)
+      ) {
         this.live.delete(key);
       }
     }
@@ -616,22 +817,27 @@ export class OpportunityStore {
     this.prune(activeKeys, now);
     const all = [...this.live.values()];
     for (const o of all) o.rank = this.score(o);
-    const ranked = [...all].sort((a, b) => b.rank - a.rank);
+    // Stable slot order: sorted primarily by birthTick (formation order) so identities keep their position
+    const stableOrder = [...all].sort((a, b) => a.birthTick - b.birthTick);
 
     this.version++;
     this.snapshot = {
       version: this.version,
-      opportunities: ranked,
-      radar: ranked.filter((o) => o.phase !== "INVALIDATED" && o.phase !== "ABSENT").slice(0, 18),
-      formation: ranked
+      opportunities: stableOrder,
+      radar: stableOrder
+        .filter((o) => o.phase !== "INVALIDATED" && o.phase !== "ABSENT")
+        .slice(0, 18),
+      formation: stableOrder
         .filter((o) => ["FORMING", "BUILDING", "MATURE"].includes(o.phase))
-        .sort((a, b) => (b.velocity["creation"] ?? 0) + b.trajectory - ((a.velocity["creation"] ?? 0) + a.trajectory))
         .slice(0, 14),
-      releaseWatch: ranked
-        .filter((o) => ["ABSORBING", "EXHAUSTING", "RIPE", "RELEASE", "DIRECTIONAL MOVE"].includes(o.phase))
-        .sort((a, b) => b.releaseProximity - a.releaseProximity)
+      releaseWatch: stableOrder
+        .filter((o) =>
+          ["ABSORBING", "EXHAUSTING", "RIPE", "RELEASE", "DIRECTIONAL MOVE"].includes(o.phase),
+        )
         .slice(0, 14),
-      conflicted: ranked.filter((o) => o.phase === "CONFLICTED" || o.phase === "BLOCKED").slice(0, 10),
+      conflicted: stableOrder
+        .filter((o) => o.phase === "CONFLICTED" || o.phase === "BLOCKED")
+        .slice(0, 10),
       ledger: this.ledger,
       born: this.born,
       invalidated: this.invalidated,

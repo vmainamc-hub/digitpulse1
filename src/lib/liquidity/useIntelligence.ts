@@ -17,6 +17,7 @@ export function useIntelligence() {
     snapshot: snap.feed,
     markets: snap.markets,
     opportunities: snap.opportunities,
+    zones: snap.zones,
     cycleMs: snap.cycleMs,
     cycles: snap.cycles,
   };

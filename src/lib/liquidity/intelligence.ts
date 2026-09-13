@@ -15,6 +15,7 @@ import {
   OpportunityStore,
   type OpportunitySnapshot,
 } from "./opportunity";
+import { getZoneRegistry, ZoneRegistry, type ZoneRegistrySnapshot } from "./zones";
 
 export interface ComputedMarket extends MarketState {
   analysis: MarketAnalysis | null;
@@ -25,6 +26,7 @@ export interface IntelligenceSnapshot {
   feed: FeedSnapshot;
   markets: ComputedMarket[];
   opportunities: OpportunitySnapshot;
+  zones: ZoneRegistrySnapshot;
   cycleMs: number;
   cycles: number;
 }
@@ -33,6 +35,7 @@ const CYCLE_INTERVAL = 900;
 
 class Intelligence {
   private store = new OpportunityStore();
+  private zoneRegistry = getZoneRegistry();
   private listeners = new Set<() => void>();
   private cache = new Map<string, { stamp: string; analysis: MarketAnalysis | null }>();
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -52,6 +55,7 @@ class Intelligence {
       feed: this.pendingFeed,
       markets: this.pendingFeed.markets.map((m) => ({ ...m, analysis: null })),
       opportunities: EMPTY_OPPORTUNITY_SNAPSHOT,
+      zones: this.zoneRegistry.snapshot,
       cycleMs: 0,
       cycles: 0,
     };
@@ -105,17 +109,23 @@ class Intelligence {
       const cached = this.cache.get(m.symbol);
       // Shared feature computation is skipped entirely when the market has not
       // advanced since the previous cycle.
-      const analysis = cached?.stamp === stamp ? cached.analysis : analyzeMarket(m.history);
+      const prevV3 = cached?.analysis?.v3Opportunities ?? {};
+      const analysis =
+        cached?.stamp === stamp ? cached.analysis : analyzeMarket(m.history, m.symbol, prevV3);
       if (cached?.stamp !== stamp) this.cache.set(m.symbol, { stamp, analysis });
       markets.push({ ...m, analysis });
 
       if (analysis) {
         this.store.ingest(m.symbol, m.name, m.group, analysis, latest?.t ?? 0);
-        for (const c of analysis.contracts) activeKeys.add(`${m.symbol}:${c.id}`);
+        for (const c of analysis.contracts) {
+          activeKeys.add(`${m.symbol}:${c.id}`);
+          this.zoneRegistry.ingest(m.symbol, m.name, m.group, analysis, c, latest?.t ?? 0);
+        }
       }
     }
 
     const opportunities = this.store.finalize(activeKeys);
+    const zones = this.zoneRegistry.finalize();
     this.cycleMs = performance.now() - t0;
     this.cycles++;
     this.version++;
@@ -126,6 +136,7 @@ class Intelligence {
       feed: snap,
       markets,
       opportunities,
+      zones,
       cycleMs: this.cycleMs,
       cycles: this.cycles,
     };

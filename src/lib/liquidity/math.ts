@@ -19,8 +19,7 @@ export const sd = (a: number[]) => Math.sqrt(variance(a));
 export const sigmoid = (x: number) => 1 / (1 + Math.exp(-x));
 
 /** Shannon entropy in bits over a probability vector. */
-export const entropy = (p: number[]) =>
-  -p.reduce((s, x) => (x > 0 ? s + x * Math.log2(x) : s), 0);
+export const entropy = (p: number[]) => -p.reduce((s, x) => (x > 0 ? s + x * Math.log2(x) : s), 0);
 
 /** Normalized entropy (0-100) over a 10-symbol alphabet. */
 export const normalizedEntropy = (p: number[]) => (entropy(p) / Math.log2(10)) * 100;

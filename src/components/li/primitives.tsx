@@ -4,17 +4,26 @@ import { cn } from "@/lib/utils";
 import type { LiquidityState } from "@/lib/liquidity/universe";
 
 const STATE_CLASS: Record<string, string> = {
+  NO_LIQUIDITY: "text-muted-foreground border-border bg-muted/20",
   ABSENT: "text-state-absent border-state-absent/35 bg-state-absent/10",
   FORMING: "text-state-forming border-state-forming/35 bg-state-forming/10",
   BUILDING: "text-state-building border-state-building/35 bg-state-building/10",
   MATURE: "text-state-mature border-state-mature/35 bg-state-mature/10",
+  EXHAUSTION_WATCH: "text-state-exhausting border-state-exhausting/35 bg-state-exhausting/10",
+  EXHAUSTION_CONFIRMED: "text-state-exhausting border-state-exhausting/45 bg-state-exhausting/15",
+  DELIVERY: "text-state-released border-state-released/35 bg-state-released/10",
+  DELIVERY_ACCELERATING: "text-state-released border-state-released/45 bg-state-released/15",
   ABSORBING: "text-state-absorbing border-state-absorbing/35 bg-state-absorbing/10",
   EXHAUSTING: "text-state-exhausting border-state-exhausting/35 bg-state-exhausting/10",
+  RELEASE_WATCH: "text-state-ripe border-state-ripe/35 bg-state-ripe/10",
   RIPE: "text-state-ripe border-state-ripe/40 bg-state-ripe/12",
+  RELEASE: "text-state-released border-state-released/40 bg-state-released/12",
   RELEASED: "text-state-released border-state-released/40 bg-state-released/12",
+  "DIRECTIONAL MOVE": "text-state-confirmed border-state-confirmed/40 bg-state-confirmed/12",
   CONFIRMED: "text-state-confirmed border-state-confirmed/45 bg-state-confirmed/14",
   CONFLICTED: "text-state-conflicted border-state-conflicted/40 bg-state-conflicted/12",
   BLOCKED: "text-state-blocked border-state-blocked/45 bg-state-blocked/14",
+  INVALIDATED: "text-state-absent border-state-absent/25 bg-state-absent/5",
   WAITING: "text-muted-foreground border-border bg-muted/40",
 };
 
