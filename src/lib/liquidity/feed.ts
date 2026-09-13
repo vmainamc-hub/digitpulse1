@@ -36,6 +36,8 @@ export interface FeedSnapshot {
 }
 
 const EMIT_INTERVAL = 500;
+const POLL_INTERVAL = 4_000;
+const TICK_SILENCE_MS = 8_000;
 
 class DerivFeed {
   private socket: WebSocket | null = null;
