@@ -53,6 +53,8 @@ class DerivFeed {
   private reconnects = 0;
   private lastMessageAt: number | null = null;
   private started = false;
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private lastTickAt = 0;
   private snapshot: FeedSnapshot;
 
   constructor() {
