@@ -16,6 +16,7 @@ import {
   type OpportunitySnapshot,
 } from "./opportunity";
 import { getZoneRegistry, ZoneRegistry, type ZoneRegistrySnapshot } from "./zones";
+import { getLiquidityScanner } from "./scanner";
 
 export interface ComputedMarket extends MarketState {
   analysis: MarketAnalysis | null;
@@ -64,6 +65,8 @@ class Intelligence {
   getSnapshot = (): IntelligenceSnapshot => this.snapshot;
 
   getServerSnapshot = (): IntelligenceSnapshot => this.snapshot;
+
+  getZoneRegistry = (): ZoneRegistry => this.zoneRegistry;
 
   subscribe = (fn: () => void) => {
     this.listeners.add(fn);
@@ -126,6 +129,7 @@ class Intelligence {
 
     const opportunities = this.store.finalize(activeKeys);
     const zones = this.zoneRegistry.finalize();
+    getLiquidityScanner().onEngineCycle(this.zoneRegistry);
     this.cycleMs = performance.now() - t0;
     this.cycles++;
     this.version++;

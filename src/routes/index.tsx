@@ -9,6 +9,7 @@ import { journal } from "@/lib/liquidity/journal";
 import { MarketRail } from "@/components/li/MarketRail";
 import { StateTag } from "@/components/li/primitives";
 import { LedgerView, RadarView } from "@/components/li/radar";
+import { BestLiquidityPanel } from "@/components/li/BestLiquidityPanel";
 import {
   DangerView,
   LiquidityView,
@@ -186,6 +187,14 @@ function Console() {
         </aside>
 
         <main className={cn("min-w-0 flex-1 p-3", railOpen && "hidden lg:block")}>
+          <div className="mb-3">
+            <BestLiquidityPanel
+              onSelectMarket={(s) => setSelected(s)}
+              onSelectContract={(c) => setContractFocus(c)}
+              activeMarketSymbol={selected}
+            />
+          </div>
+
           <div className="panel mb-3 flex flex-wrap items-center gap-4 px-3 py-2">
             <div>
               <div className="mono-label">{current?.symbol}</div>

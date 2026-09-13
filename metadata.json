@@ -1,6 +1,6 @@
 {
   "name": "Deriv Liquidity Intelligence",
-  "description": "Live observable liquidity-formation research across 15 Deriv synthetic markets.",
+  "description": "Live observable liquidity-formation research and smart decision scanner across 15 Deriv synthetic markets.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
