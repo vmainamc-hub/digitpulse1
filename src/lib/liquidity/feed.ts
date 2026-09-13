@@ -116,7 +116,32 @@ class DerivFeed {
     if (this.started || typeof window === "undefined") return;
     this.started = true;
     this.emitTimer = setInterval(() => this.emit(), EMIT_INTERVAL);
+    // Some networks/regions reject the streaming `ticks` subscription while
+    // `ticks_history` still resolves. Refresh history on a timer whenever the
+    // live stream is silent so the analytics keep advancing.
+    this.pollTimer = setInterval(() => this.pollHistory(), POLL_INTERVAL);
     this.connect();
+  }
+
+  private pollHistory() {
+    const socket = this.socket;
+    if (!socket || socket.readyState !== 1) return;
+    if (Date.now() - this.lastTickAt < TICK_SILENCE_MS) return;
+    this.requestHistory(socket);
+  }
+
+  private requestHistory(socket: WebSocket) {
+    for (const m of UNIVERSE) {
+      socket.send(
+        JSON.stringify({
+          ticks_history: m.symbol,
+          count: HISTORY_CAP,
+          end: "latest",
+          style: "ticks",
+          req_id: ++this.reqId,
+        }),
+      );
+    }
   }
 
   reconnect = () => {
