@@ -263,6 +263,7 @@ class DerivFeed {
 
   stop() {
     if (this.emitTimer) clearInterval(this.emitTimer);
+    if (this.pollTimer) clearInterval(this.pollTimer);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     try {
       this.socket?.close();
