@@ -543,7 +543,7 @@ export function ResearchView({
                     {v > 0.16 ? Math.round(v * 100) : ""}
                   </div>
                 ))}
-              </>
+              </Fragment>
             ))}
           </div>
           <Note>Cell intensity is the conditional probability P(next = j | current = i).</Note>
