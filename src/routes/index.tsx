@@ -8,6 +8,7 @@ import { getFeed } from "@/lib/liquidity/feed";
 import { journal } from "@/lib/liquidity/journal";
 import { MarketRail } from "@/components/li/MarketRail";
 import { StateTag } from "@/components/li/primitives";
+import { LedgerView, RadarView } from "@/components/li/radar";
 import {
   DangerView,
   LiquidityView,
@@ -39,6 +40,8 @@ export const Route = createFileRoute("/")({
 });
 
 const TABS = [
+  ["RADAR", "Opportunity radar"],
+  ["LEDGER", "Event ledger"],
   ["LIQUIDITY", "Liquidity"],
   ["PSYCHOLOGY", "Psychology"],
   ["DANGER", "Danger lab"],
@@ -49,10 +52,10 @@ const TABS = [
 type Tab = (typeof TABS)[number][0];
 
 function Console() {
-  const { snapshot, markets } = useIntelligence();
+  const { snapshot, markets, opportunities, cycleMs } = useIntelligence();
   const observations = useJournal();
   const [selected, setSelected] = useState("R_75");
-  const [tab, setTab] = useState<Tab>("LIQUIDITY");
+  const [tab, setTab] = useState<Tab>("RADAR");
   const [contractFocus, setContractFocus] = useState("");
   const [railOpen, setRailOpen] = useState(false);
 
@@ -119,6 +122,12 @@ function Console() {
             </span>
             <span className="mono-label rounded border border-border px-2 py-1">
               {snapshot.ticksReceived} live ticks
+            </span>
+            <span className="mono-label rounded border border-border px-2 py-1">
+              {snapshot.health}
+            </span>
+            <span className="mono-label rounded border border-border px-2 py-1">
+              cycle {cycleMs.toFixed(0)}ms
             </span>
             <span className="mono-label rounded border border-border px-2 py-1">
               engine {ANALYSIS_VERSION}
@@ -225,7 +234,12 @@ function Console() {
             </div>
           ) : null}
 
-          {!analysis ? (
+          {tab === "RADAR" && (
+            <RadarView snap={opportunities} onSelectMarket={setSelected} />
+          )}
+          {tab === "LEDGER" && <LedgerView snap={opportunities} />}
+
+          {tab === "RADAR" || tab === "LEDGER" ? null : !analysis ? (
             <div className="panel flex h-64 items-center justify-center text-sm text-muted-foreground">
               Seeding the 15-market reservoir from Deriv public market data…
             </div>
