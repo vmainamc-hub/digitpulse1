@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 
 import { getIntelligence, type ComputedMarket, type IntelligenceSnapshot } from "./intelligence";
 import { journal } from "./journal";
@@ -20,7 +20,6 @@ export {
   calculateStructuralLiquidityLevel,
 } from "./authoritative-v4";
 
-/** Read-only subscription to the continuously running intelligence engine. */
 export function useIntelligenceSnapshot(): IntelligenceSnapshot {
   const intel = getIntelligence();
   return useSyncExternalStore(intel.subscribe, intel.getSnapshot, intel.getServerSnapshot);
@@ -38,35 +37,19 @@ export function useIntelligence() {
   };
 }
 
-function toScanResult(
-  market: ComputedMarket,
-  contract: AuthoritativeContract,
-  rank: number,
-): ScanResult {
-  const analysis = market.authoritative;
+function toScanResult(market: ComputedMarket, contract: AuthoritativeContract, rank: number): ScanResult {
   const now = Date.now();
-  const psychologyAdherence = contract.vetoes.length === 0 ? 100 : Math.max(0, 100 - contract.vetoes.length * 20);
-  const trajectory =
-    contract.trajectory === "RELEASING"
-      ? "RELEASING"
-      : contract.trajectory === "MATURING"
-        ? "MATURING"
-        : contract.trajectory === "EXHAUSTING"
-          ? "EXHAUSTING"
-          : contract.trajectory === "STRENGTHENING"
-            ? "STRENGTHENING"
-            : contract.trajectory === "WEAKENING"
-              ? "WEAKENING"
-              : "STABLE";
   const strictQualified =
-    contract.qualificationStatus === "QUALIFIED" &&
     contract.age >= 12 &&
     contract.accumulatedLiquidity >= 65 &&
     contract.maturity >= 62 &&
     contract.exhaustion >= 65 &&
     contract.delivery >= 62 &&
     contract.conflict < 60 &&
-    contract.vetoes.length === 0;
+    contract.vetoes.length === 0 &&
+    contract.qualificationStatus === "QUALIFIED";
+  const psychologyAdherence = contract.vetoes.length === 0 ? 100 : Math.max(0, 100 - contract.vetoes.length * 20);
+  const trajectory = contract.trajectory as ScanResult["trajectory"];
 
   return {
     zoneId: `${market.symbol}:${contract.id}`,
@@ -112,11 +95,8 @@ function toScanResult(
     conflictScore: contract.conflict,
     lifecycleState: contract.state as ScanResult["lifecycleState"],
     multiWindowSupport: `${[contract.maturity >= 62, contract.exhaustion >= 65, contract.delivery >= 62, contract.reservoirScore >= 50, contract.conflict < 60, contract.vetoes.length === 0].filter(Boolean).length}/6`,
-    trajectory: trajectory as ScanResult["trajectory"],
-    explanation: {
-      primaryReasons: contract.evidence.slice(0, 6),
-      runnerUpComparison: null,
-    },
+    trajectory,
+    explanation: { primaryReasons: contract.evidence.slice(0, 6), runnerUpComparison: null },
     timeline: [],
     evidenceHistory: [],
     isOverride: false,
@@ -127,73 +107,43 @@ function toScanResult(
 }
 
 /**
- * Production selection facade.
- *
- * This replaces the former independent scanner/zone ranking path. Selection is
- * now derived directly from the cached authoritative V4 contract projections.
- * The old scanner module remains available only for compatibility and is not
- * invoked by the production UI.
+ * Production selection facade. The UI ranking now reads the cached authoritative
+ * V4 projections directly; the former independent scanner is not invoked.
  */
 export function useBestLiquidityScanner() {
   const snap = useIntelligenceSnapshot();
-  const [state, setState] = useStateFromAuthoritative();
+  const [totalScansPerformed, setTotalScansPerformed] = useState(0);
 
   const ranked = snap.markets
-    .flatMap((market) =>
-      (market.authoritative?.contracts ?? []).map((contract) => ({ market, contract })),
-    )
+    .flatMap((market) => (market.authoritative?.contracts ?? []).map((contract) => ({ market, contract })))
     .sort((a, b) => b.contract.confirmation - a.contract.confirmation);
-
   const allRanked = ranked.map(({ market, contract }, i) => toScanResult(market, contract, i + 1));
   const currentSelection = allRanked[0] ?? null;
   const bestQualified = allRanked.find((x) => x.qualified) ?? null;
 
   const scan = () => {
-    setState((previous) => ({ ...previous, totalScansPerformed: previous.totalScansPerformed + 1 }));
+    setTotalScansPerformed((n) => n + 1);
     return currentSelection;
   };
 
   return {
-    ...state,
     currentSelection,
     bestQualified,
     allRanked,
+    lastScanTimestamp: null,
+    cooldownRemainingSeconds: 0,
+    cooldownActive: false,
+    isScanning: false,
     noRankedFound: allRanked.length === 0,
     noQualifiedFound: bestQualified === null,
-    isScanning: false,
-    cooldownActive: false,
-    cooldownRemainingSeconds: 0,
-    rankHoldTimeSeconds: 0,
-    lastOverride: null,
+    totalScansPerformed,
     overrideCount: 0,
+    rankHoldTimeSeconds: 0,
+    scanHistory: [],
+    lastOverride: null,
     scan,
-    reset: () => setState((previous) => ({ ...previous, totalScansPerformed: 0 })),
-  } satisfies Omit<ScannerState, "currentSelection" | "bestQualified" | "allRanked" | "noRankedFound" | "noQualifiedFound" | "isScanning" | "cooldownActive" | "cooldownRemainingSeconds" | "rankHoldTimeSeconds" | "lastOverride" | "overrideCount"> & {
-    currentSelection: ScanResult | null;
-    bestQualified: ScanResult | null;
-    allRanked: ScanResult[];
-    noRankedFound: boolean;
-    noQualifiedFound: boolean;
-    isScanning: boolean;
-    cooldownActive: boolean;
-    cooldownRemainingSeconds: number;
-    rankHoldTimeSeconds: number;
-    lastOverride: ScannerState["lastOverride"];
-    overrideCount: number;
-    scan: () => ScanResult | null;
-    reset: () => void;
-  };
-}
-
-function useStateFromAuthoritative() {
-  const [state, setState] = requireReactState();
-  return [state, setState] as const;
-}
-
-function requireReactState() {
-  // Kept isolated so the external-store hook remains the only reactive source
-  // for market intelligence. Scanner state itself is merely UI scan counters.
-  return useState<{ totalScansPerformed: number }>({ totalScansPerformed: 0 });
+    reset: () => setTotalScansPerformed(0),
+  } as ScannerState & { scan: () => ScanResult | null; reset: () => void };
 }
 
 export function useJournal() {
