@@ -151,6 +151,25 @@
   border-radius: var(--radius-lg);
 }
 
+@utility glass {
+  background: color-mix(in oklab, var(--color-surface) 72%, transparent);
+  border: 1px solid color-mix(in oklab, var(--color-border) 70%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+@utility glass-hero {
+  background:
+    radial-gradient(
+      120% 140% at 12% -10%,
+      color-mix(in oklab, var(--color-signal) 12%, transparent) 0%,
+      transparent 60%
+    ),
+    color-mix(in oklab, var(--color-surface-raised) 88%, transparent);
+  border: 1px solid color-mix(in oklab, var(--color-border-strong) 60%, transparent);
+  box-shadow: 0 24px 60px -40px color-mix(in oklab, var(--color-signal) 40%, transparent);
+  backdrop-filter: blur(18px);
+}
+
 @utility mono-label {
   font-family: var(--font-mono);
   font-size: 0.625rem;

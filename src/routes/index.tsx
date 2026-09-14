@@ -10,6 +10,7 @@ import { MarketRail } from "@/components/li/MarketRail";
 import { StateTag } from "@/components/li/primitives";
 import { LedgerView, RadarView } from "@/components/li/radar";
 import { BestLiquidityPanel } from "@/components/li/BestLiquidityPanel";
+import { SignalBriefing } from "@/components/li/SignalBriefing";
 import {
   DangerView,
   LiquidityView,
@@ -59,6 +60,7 @@ function Console() {
   const [tab, setTab] = useState<Tab>("RADAR");
   const [contractFocus, setContractFocus] = useState("");
   const [railOpen, setRailOpen] = useState(false);
+  const [advanced, setAdvanced] = useState(false);
 
   const current = markets.find((m) => m.symbol === selected) ?? markets[0];
   const analysis = current?.analysis ?? null;
@@ -146,34 +148,49 @@ function Console() {
         <nav className="flex items-center gap-1 overflow-x-auto border-t border-border px-3 py-1.5">
           <button
             type="button"
-            onClick={() => setRailOpen((v) => !v)}
-            className="mono-label rounded border border-border px-2 py-1 lg:hidden"
+            onClick={() => setAdvanced((v) => !v)}
+            className={cn(
+              "rounded px-2.5 py-1 font-mono text-[11px] tracking-[0.08em] transition-colors",
+              advanced ? "bg-signal/15 text-signal" : "text-muted-foreground hover:text-foreground",
+            )}
           >
-            Markets
+            {advanced ? "Hide advanced intelligence" : "Advanced intelligence"}
           </button>
-          {TABS.map(([k, label]) => (
-            <button
-              key={k}
-              type="button"
-              onClick={() => setTab(k)}
-              className={cn(
-                "rounded px-2.5 py-1 font-mono text-[11px] tracking-[0.08em] whitespace-nowrap transition-colors",
-                tab === k
-                  ? "bg-signal/15 text-signal"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {label}
-            </button>
-          ))}
+          {advanced ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setRailOpen((v) => !v)}
+                className="mono-label rounded border border-border px-2 py-1 lg:hidden"
+              >
+                Markets
+              </button>
+              {TABS.map(([k, label]) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setTab(k)}
+                  className={cn(
+                    "rounded px-2.5 py-1 font-mono text-[11px] tracking-[0.08em] whitespace-nowrap transition-colors",
+                    tab === k
+                      ? "bg-signal/15 text-signal"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </>
+          ) : null}
         </nav>
       </header>
 
       <div className="flex">
         <aside
           className={cn(
-            "w-full shrink-0 overflow-y-auto border-r border-border bg-background p-3 lg:block lg:max-h-[calc(100vh-84px)] lg:w-72 lg:sticky lg:top-[84px]",
-            railOpen ? "block" : "hidden",
+            "w-full shrink-0 overflow-y-auto border-r border-border bg-background p-3 lg:max-h-[calc(100vh-84px)] lg:w-72 lg:sticky lg:top-[84px]",
+            advanced ? "lg:block" : "lg:hidden",
+            railOpen && advanced ? "block" : "hidden",
           )}
         >
           <MarketRail
@@ -186,14 +203,30 @@ function Console() {
           />
         </aside>
 
-        <main className={cn("min-w-0 flex-1 p-3", railOpen && "hidden lg:block")}>
-          <div className="mb-3">
-            <BestLiquidityPanel
-              onSelectMarket={(s) => setSelected(s)}
-              onSelectContract={(c) => setContractFocus(c)}
-              activeMarketSymbol={selected}
-            />
-          </div>
+        <main
+          className={cn(
+            "mx-auto min-w-0 flex-1 px-4 py-6 md:px-6",
+            advanced ? "" : "max-w-5xl",
+            railOpen && advanced && "hidden lg:block",
+          )}
+        >
+          <SignalBriefing
+            onInspect={(s, c) => {
+              setSelected(s);
+              setContractFocus(c);
+              setAdvanced(true);
+            }}
+            activeMarketSymbol={selected}
+          />
+
+          {advanced ? (
+            <div className="mt-8 space-y-3">
+              <BestLiquidityPanel
+                onSelectMarket={(s) => setSelected(s)}
+                onSelectContract={(c) => setContractFocus(c)}
+                activeMarketSymbol={selected}
+              />
+
 
           <div className="panel mb-3 flex flex-wrap items-center gap-4 px-3 py-2">
             <div>
