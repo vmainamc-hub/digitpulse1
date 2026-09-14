@@ -1,4 +1,4 @@
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 
 import { getIntelligence, type ComputedMarket, type IntelligenceSnapshot } from "./intelligence";
 import { journal } from "./journal";
@@ -109,62 +109,79 @@ function rankAuthoritativeSnapshot(snap: IntelligenceSnapshot, scannedAt: number
     .map(({ market, contract }, i) => toScanResult(market, contract, i + 1, scannedAt));
 }
 
+interface SharedScannerSnapshot {
+  scannedRanked: ScanResult[];
+  lastScanTimestamp: number | null;
+  totalScansPerformed: number;
+}
+
+const EMPTY_SCANNER: SharedScannerSnapshot = {
+  scannedRanked: [],
+  lastScanTimestamp: null,
+  totalScansPerformed: 0,
+};
+
+let sharedScannerSnapshot: SharedScannerSnapshot = EMPTY_SCANNER;
+const scannerListeners = new Set<() => void>();
+
+function subscribeScanner(listener: () => void) {
+  scannerListeners.add(listener);
+  return () => scannerListeners.delete(listener);
+}
+
+function getScannerSnapshot() {
+  return sharedScannerSnapshot;
+}
+
+function publishScanner(next: SharedScannerSnapshot) {
+  sharedScannerSnapshot = next;
+  for (const listener of scannerListeners) listener();
+}
+
 /**
  * Deliberate production scanner.
  *
- * IMPORTANT: the authoritative engine may continue observing live ticks between scans,
- * but the selected market/contract is a SNAPSHOT taken only when the user presses SCAN.
- * This prevents the UI from jumping between candidates every intelligence cycle.
+ * The authoritative engine continues observing live ticks between scans, but the
+ * selected market/contract is a SNAPSHOT taken only when the user presses SCAN.
+ * Scanner state is shared by every UI consumer, so the briefing and scanner panel
+ * cannot disagree about whether a scan has happened or which formation was selected.
  */
 export function useBestLiquidityScanner() {
   const snap = useIntelligenceSnapshot();
-  const [scanVersion, setScanVersion] = useState(0);
-  const [lastScanTimestamp, setLastScanTimestamp] = useState<number | null>(null);
-  const [scannedRanked, setScannedRanked] = useState<ScanResult[]>([]);
+  const scanner = useSyncExternalStore(subscribeScanner, getScannerSnapshot, getScannerSnapshot);
 
-  const liveRanked = useMemo(() => rankAuthoritativeSnapshot(snap, Date.now()), [snap]);
-
-  const cooldownRemainingSeconds = lastScanTimestamp === null
+  const currentSelection = scanner.scannedRanked[0] ?? null;
+  const bestQualified = scanner.scannedRanked.find((x) => x.qualified) ?? null;
+  const cooldownRemainingSeconds = scanner.lastScanTimestamp === null
     ? 0
-    : Math.max(0, COOLDOWN_SECONDS - Math.floor((Date.now() - lastScanTimestamp) / 1000));
-  const cooldownActive = lastScanTimestamp !== null && cooldownRemainingSeconds > 0;
-
-  const currentSelection = scannedRanked[0] ?? null;
-  const bestQualified = scannedRanked.find((x) => x.qualified) ?? null;
+    : Math.max(0, COOLDOWN_SECONDS - Math.floor((Date.now() - scanner.lastScanTimestamp) / 1000));
+  const cooldownActive = scanner.lastScanTimestamp !== null && cooldownRemainingSeconds > 0;
 
   const scan = () => {
     if (cooldownActive) return currentSelection;
     const scannedAt = Date.now();
     const ranked = rankAuthoritativeSnapshot(snap, scannedAt);
-    setScannedRanked(ranked);
-    setLastScanTimestamp(scannedAt);
-    setScanVersion((v) => v + 1);
+    publishScanner({
+      scannedRanked: ranked,
+      lastScanTimestamp: scannedAt,
+      totalScansPerformed: scanner.totalScansPerformed + 1,
+    });
     return ranked[0] ?? null;
   };
 
-  const reset = () => {
-    setScannedRanked([]);
-    setLastScanTimestamp(null);
-    setScanVersion((v) => v + 1);
-  };
-
-  // Recompute the cooldown on every intelligence render without ever changing the
-  // selected formation. This is intentionally presentation state, not selection logic.
-  void scanVersion;
-  void liveRanked;
+  const reset = () => publishScanner(EMPTY_SCANNER);
 
   return {
     currentSelection,
     bestQualified,
-    // Keep the leaderboard tied to the last deliberate scan, not live ticks.
-    allRanked: scannedRanked,
-    lastScanTimestamp,
+    allRanked: scanner.scannedRanked,
+    lastScanTimestamp: scanner.lastScanTimestamp,
     cooldownRemainingSeconds,
     cooldownActive,
     isScanning: false,
-    noRankedFound: scannedRanked.length === 0,
-    noQualifiedFound: scannedRanked.length > 0 && bestQualified === null,
-    totalScansPerformed: lastScanTimestamp === null ? 0 : scanVersion,
+    noRankedFound: scanner.scannedRanked.length === 0,
+    noQualifiedFound: scanner.scannedRanked.length > 0 && bestQualified === null,
+    totalScansPerformed: scanner.totalScansPerformed,
     overrideCount: 0,
     rankHoldTimeSeconds: 0,
     scanHistory: [],
