@@ -16,6 +16,8 @@ import {
   type SentinelPsychologySnapshot,
   type EvidenceAccumulators,
   type ZoneLifecycleState,
+  calculateLiquidityLevel,
+  calculatePsychologyAdherence,
 } from "./zones.ts";
 import { correlateFeedMessage, type Pending } from "./feed.ts";
 import type { MarketAnalysis, ContractAnalysis } from "./engine.ts";
@@ -101,6 +103,10 @@ function createMockZone(
     structuralDeparture?: number;
     contradiction?: number;
     generation?: number;
+    liquidityLevel?: number;
+    liquidityTrend?: number;
+    liquidityAcceleration?: number;
+    psychologyAdherence?: number;
   } = {},
 ): LiquidityZone {
   const isUnder = contract.startsWith("UNDER");
@@ -121,6 +127,13 @@ function createMockZone(
     contradiction: options.contradiction ?? 10,
     structuralDeparture: options.structuralDeparture ?? 50,
   });
+
+  const ageTicks = options.ageTicks ?? 45;
+  const liqCalc = calculateLiquidityLevel(accumulators, ageTicks, psych, undefined, 0);
+  const psychCalc = calculatePsychologyAdherence(psych, isUnder ? "UNDER" : "OVER", barrier, [
+    red,
+    4,
+  ]);
 
   return {
     zoneId,
@@ -186,6 +199,12 @@ function createMockZone(
     rankingScore: options.accumulatedLiquidity ?? 80,
     isTerminal: false,
     milestones: new Set<string>(),
+    liquidityLevel: options.liquidityLevel ?? liqCalc.level,
+    liquidityTrend: options.liquidityTrend ?? liqCalc.trend,
+    liquidityAcceleration: options.liquidityAcceleration ?? liqCalc.acceleration,
+    psychologyAdherence: options.psychologyAdherence ?? psychCalc.adherence,
+    psychologyDetails: psychCalc.details,
+    liquidityComposition: liqCalc.composition,
   };
 }
 
@@ -650,5 +669,197 @@ describe("Section 25 Mandatory Unit Test Suite (Tests 1 - 12)", () => {
       "req_id must take precedence over echo_req fallback",
     );
     assert.equal(correlation2.symbol, "R_50");
+  });
+});
+
+describe("Section 26 Restored Indicators Suite — Liquidity Level & Psychology Adherence", () => {
+  // Test 1: Existence of both indicators on valid formations
+  it("Test 1 — Liquidity level and Psychology adherence exist on valid formations", () => {
+    const zone = createMockZone("R_100", "UNDER 7", "R100-U7-TEST1", {
+      validPsych: true,
+      accumulatedLiquidity: 82,
+      dominantExhaustion: 79,
+      delivery: 75,
+      reservoirPersistence: 86,
+      ageTicks: 25,
+    });
+
+    assert.ok(zone.liquidityLevel !== undefined, "liquidityLevel must be defined");
+    assert.equal(typeof zone.liquidityLevel, "number");
+    assert.ok(
+      zone.liquidityLevel >= 0 && zone.liquidityLevel <= 100,
+      "liquidityLevel must be 0-100",
+    );
+
+    assert.ok(zone.psychologyAdherence !== undefined, "psychologyAdherence must be defined");
+    assert.equal(typeof zone.psychologyAdherence, "number");
+    assert.ok(
+      zone.psychologyAdherence >= 0 && zone.psychologyAdherence <= 100,
+      "psychologyAdherence must be 0-100",
+    );
+
+    assert.ok(zone.liquidityComposition !== undefined, "liquidityComposition must be defined");
+    assert.ok(zone.psychologyDetails !== undefined, "psychologyDetails must be defined");
+  });
+
+  // Test 2: Independence from rankScore
+  it("Test 2 — Independence from rankScore", () => {
+    const zoneA = createMockZone("R_100", "UNDER 7", "R100-U7-A", {
+      validPsych: true,
+      accumulatedLiquidity: 85,
+      conflict: 10,
+      ageTicks: 40,
+    });
+
+    const zoneB = createMockZone("R_50", "UNDER 7", "R50-U7-B", {
+      validPsych: false, // Psychology violated
+      accumulatedLiquidity: 85, // Same liquidity
+      conflict: 50,
+      ageTicks: 40,
+    });
+
+    const rankScoreA = calculateFormationRankScore(zoneA);
+    const rankScoreB = calculateFormationRankScore(zoneB);
+
+    // psychology adherence is distinct from rankScore
+    assert.notEqual(
+      zoneA.psychologyAdherence,
+      rankScoreA,
+      "Psychology adherence must not be a mere copy of rankScore",
+    );
+    assert.notEqual(
+      zoneA.liquidityLevel,
+      rankScoreA,
+      "Liquidity level must not be a mere copy of rankScore",
+    );
+
+    // When psychology is violated, adherence drops significantly
+    assert.ok(
+      zoneA.psychologyAdherence > zoneB.psychologyAdherence,
+      `Zone A adherence (${zoneA.psychologyAdherence}) must exceed Zone B adherence (${zoneB.psychologyAdherence})`,
+    );
+  });
+
+  // Test 3: Psychology violation lowers adherence
+  it("Test 3 — Psychology violation lowers adherence", () => {
+    const compliantZone = createMockZone("R_100", "UNDER 7", "R100-U7-COMPLIANT", {
+      validPsych: true,
+      conflict: 5,
+    });
+
+    const violatedZone = createMockZone("R_100", "UNDER 7", "R100-U7-VIOLATED", {
+      validPsych: false,
+      conflict: 45,
+    });
+
+    assert.ok(
+      compliantZone.psychologyAdherence >= 85,
+      `Compliant zone adherence (${compliantZone.psychologyAdherence}) must be >= 85`,
+    );
+    assert.ok(
+      violatedZone.psychologyAdherence <= 70,
+      `Violated zone adherence (${violatedZone.psychologyAdherence}) must be <= 70`,
+    );
+    assert.equal(violatedZone.psychologyDetails?.sentinelStatus, "REJECT");
+  });
+
+  // Test 4: Strong Sentinel-compliant formations receive higher adherence
+  it("Test 4 — Strong Sentinel-compliant formations receive higher adherence", () => {
+    const strongZone = createMockZone("R_75", "UNDER 7", "R75-U7-STRONG", {
+      validPsych: true,
+      green: 3,
+      red: 2,
+      conflict: 0,
+    });
+
+    assert.ok(
+      strongZone.psychologyAdherence >= 85,
+      `Strong zone must achieve strong or exceptional adherence (got ${strongZone.psychologyAdherence})`,
+    );
+    assert.equal(strongZone.psychologyDetails?.sentinelStatus, "ACCEPT");
+    assert.equal(strongZone.psychologyDetails?.greenPass, true);
+    assert.equal(strongZone.psychologyDetails?.redPass, true);
+  });
+
+  // Test 5: Liquidity increases with persistent evidence
+  it("Test 5 — Liquidity increases with persistent evidence", () => {
+    const youngZone = createMockZone("R_100", "UNDER 7", "R100-U7-YOUNG", {
+      accumulatedLiquidity: 30,
+      dominantExhaustion: 35,
+      delivery: 30,
+      reservoirPersistence: 25,
+      ageTicks: 2,
+    });
+
+    const matureZone = createMockZone("R_100", "UNDER 7", "R100-U7-MATURE", {
+      accumulatedLiquidity: 88,
+      dominantExhaustion: 85,
+      delivery: 80,
+      reservoirPersistence: 90,
+      ageTicks: 60,
+    });
+
+    assert.ok(
+      matureZone.liquidityLevel > youngZone.liquidityLevel,
+      `Mature zone liquidity level (${matureZone.liquidityLevel}) must exceed young zone (${youngZone.liquidityLevel})`,
+    );
+    assert.ok(
+      matureZone.liquidityComposition.persistence > youngZone.liquidityComposition.persistence,
+      "Persistence dimension must increase with ageTicks",
+    );
+  });
+
+  // Test 6: Scanned rank #1 exposes both values
+  it("Test 6 — Scanned rank #1 exposes both values", () => {
+    const formA = createMockZone("R_100", "UNDER 7", "R100-U7-TOP", {
+      validPsych: true,
+      accumulatedLiquidity: 90,
+      dominantExhaustion: 85,
+      delivery: 85,
+      reservoirPersistence: 88,
+      ageTicks: 50,
+      lifecycleState: "RIPE",
+    });
+
+    const formB = createMockZone("R_50", "UNDER 7", "R50-U7-LOW", {
+      validPsych: true,
+      accumulatedLiquidity: 60,
+      dominantExhaustion: 55,
+      delivery: 50,
+      reservoirPersistence: 50,
+      ageTicks: 20,
+      lifecycleState: "BUILDING",
+    });
+
+    const registry = createMockRegistry([formA, formB]);
+    const scanResult = scanBestLiquidityFormation(registry);
+
+    assert.ok(scanResult.bestRanked !== null, "bestRanked must exist");
+    const best = scanResult.bestRanked;
+
+    assert.equal(
+      typeof best.liquidityLevel,
+      "number",
+      "bestRanked.liquidityLevel must be a number",
+    );
+    assert.ok(best.liquidityLevel >= 0 && best.liquidityLevel <= 100, "liquidityLevel in [0, 100]");
+    assert.equal(
+      typeof best.liquidityTrend,
+      "number",
+      "bestRanked.liquidityTrend must be a number",
+    );
+
+    assert.equal(
+      typeof best.psychologyAdherence,
+      "number",
+      "bestRanked.psychologyAdherence must be a number",
+    );
+    assert.ok(
+      best.psychologyAdherence >= 0 && best.psychologyAdherence <= 100,
+      "psychologyAdherence in [0, 100]",
+    );
+
+    assert.ok(best.liquidityComposition !== undefined, "bestRanked.liquidityComposition exists");
+    assert.ok(best.psychologyDetails !== undefined, "bestRanked.psychologyDetails exists");
   });
 });

@@ -47,6 +47,76 @@ const JOURNEY_PHASES = [
   { id: "CONFIRMED", label: "CONFIRMED" },
 ] as const;
 
+export function getPsychologyAdherenceLabel(score: number): {
+  label: "EXCEPTIONAL" | "STRONG" | "ACCEPTABLE" | "WEAK" | "POOR";
+  className: string;
+  badgeClassName: string;
+} {
+  if (score >= 95) {
+    return {
+      label: "EXCEPTIONAL",
+      className: "text-emerald-400",
+      badgeClassName: "bg-emerald-500/15 text-emerald-400 border border-emerald-500/40",
+    };
+  }
+  if (score >= 85) {
+    return {
+      label: "STRONG",
+      className: "text-calm",
+      badgeClassName: "bg-calm/15 text-calm border border-calm/40",
+    };
+  }
+  if (score >= 70) {
+    return {
+      label: "ACCEPTABLE",
+      className: "text-signal",
+      badgeClassName: "bg-signal/15 text-signal border border-signal/40",
+    };
+  }
+  if (score >= 50) {
+    return {
+      label: "WEAK",
+      className: "text-warning",
+      badgeClassName: "bg-warning/15 text-warning border border-warning/40",
+    };
+  }
+  return {
+    label: "POOR",
+    className: "text-danger",
+    badgeClassName: "bg-danger/15 text-danger border border-danger/40",
+  };
+}
+
+export function getLiquidityTrendInfo(trend: number): {
+  label: "BUILDING ↑" | "WEAKENING ↓" | "STABLE →";
+  direction: "up" | "down" | "flat";
+  className: string;
+  badgeClassName: string;
+} {
+  if (trend > 0.5) {
+    return {
+      label: "BUILDING ↑",
+      direction: "up",
+      className: "text-calm",
+      badgeClassName: "bg-calm/15 text-calm border border-calm/40",
+    };
+  }
+  if (trend < -0.5) {
+    return {
+      label: "WEAKENING ↓",
+      direction: "down",
+      className: "text-danger",
+      badgeClassName: "bg-danger/15 text-danger border border-danger/40",
+    };
+  }
+  return {
+    label: "STABLE →",
+    direction: "flat",
+    className: "text-muted-foreground",
+    badgeClassName: "bg-surface border border-border text-muted-foreground",
+  };
+}
+
 function getPhaseIndex(phase: string): number {
   switch (phase) {
     case "FORMING":
@@ -355,6 +425,217 @@ export function BestLiquidityPanel({
                 </div>
               </div>
 
+              {/* RESTORED FIRST-CLASS SIGNAL INDICATORS: LIQUIDITY LEVEL & PSYCHOLOGY ADHERENCE */}
+              {(() => {
+                const liqLevel = Math.round(
+                  currentSelection.liquidityLevel ?? currentSelection.liquidityScore ?? 0,
+                );
+                const liqTrend = currentSelection.liquidityTrend ?? 0;
+                const liqTrendInfo = getLiquidityTrendInfo(liqTrend);
+                const psychAdherence = Math.round(currentSelection.psychologyAdherence ?? 50);
+                const psychAdhInfo = getPsychologyAdherenceLabel(psychAdherence);
+                const liqComp = currentSelection.liquidityComposition ?? {
+                  reservoir: currentSelection.reservoirScore ?? 50,
+                  maturation: Math.min(100, (currentSelection.formationAge ?? 1) * 3),
+                  exhaustion: currentSelection.dominantExhaustion ?? 50,
+                  delivery: currentSelection.deliveryScore ?? 50,
+                  persistence: Math.min(100, (currentSelection.formationAge ?? 1) * 4),
+                  structure: 50,
+                };
+                const psychDetails = currentSelection.psychologyDetails ?? {
+                  greenPass: true,
+                  secondGreenPass: true,
+                  redPass: true,
+                  secondRedPass: true,
+                  purplePass: true,
+                  sentinelStatus:
+                    currentSelection.psychologyValidity === "VALID"
+                      ? "ACCEPT"
+                      : currentSelection.psychologyValidity,
+                  reasons: currentSelection.psychologyReasons ?? [],
+                };
+
+                return (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-0.5">
+                    {/* INDICATOR 1: LIQUIDITY LEVEL & COMPOSITION */}
+                    <div className="rounded-lg border border-border/80 bg-surface/90 p-3.5 space-y-2.5 shadow-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                          LIQUIDITY LEVEL
+                        </span>
+                        <span
+                          className={cn(
+                            "rounded px-2 py-0.5 font-mono text-[10px] font-bold uppercase",
+                            liqTrendInfo.badgeClassName,
+                          )}
+                        >
+                          {liqTrendInfo.label}
+                        </span>
+                      </div>
+
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-3xl font-black tracking-tight text-foreground font-mono">
+                          {liqLevel}%
+                        </span>
+                        <span className="text-[11px] font-mono text-muted-foreground">
+                          {liqTrend >= 0 ? "+" : ""}
+                          {liqTrend.toFixed(1)}/min
+                        </span>
+                      </div>
+
+                      {/* Liquidity Composition breakdown */}
+                      <div className="border-t border-border/50 pt-2 space-y-1">
+                        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                          Liquidity Composition
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-[11px]">
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Reservoir:</span>
+                            <span className="font-semibold text-foreground">
+                              {liqComp.reservoir}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Maturation:</span>
+                            <span className="font-semibold text-foreground">
+                              {liqComp.maturation}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Exhaustion:</span>
+                            <span className="font-semibold text-foreground">
+                              {liqComp.exhaustion}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Delivery:</span>
+                            <span className="font-semibold text-foreground">
+                              {liqComp.delivery}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Persistence:</span>
+                            <span className="font-semibold text-foreground">
+                              {liqComp.persistence}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Structure:</span>
+                            <span className="font-semibold text-foreground">
+                              {liqComp.structure}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* INDICATOR 2: PSYCHOLOGY ADHERENCE & DETAILS */}
+                    <div className="rounded-lg border border-border/80 bg-surface/90 p-3.5 space-y-2.5 shadow-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                          PSYCHOLOGY ADHERENCE
+                        </span>
+                        <span
+                          className={cn(
+                            "rounded px-2 py-0.5 font-mono text-[10px] font-bold uppercase",
+                            psychAdhInfo.badgeClassName,
+                          )}
+                        >
+                          {psychAdhInfo.label}
+                        </span>
+                      </div>
+
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-3xl font-black tracking-tight text-foreground font-mono">
+                          {psychAdherence}%
+                        </span>
+                        <span
+                          className={cn(
+                            "text-[11px] font-mono font-semibold",
+                            psychAdhInfo.className,
+                          )}
+                        >
+                          {psychAdhInfo.label}
+                        </span>
+                      </div>
+
+                      {/* Psychology Details compliance checks */}
+                      <div className="border-t border-border/50 pt-2 space-y-1.5">
+                        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                          Compliance Checks
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px]">
+                          <span
+                            className={cn(
+                              "inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-[10px]",
+                              psychDetails.greenPass
+                                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                                : "border-red-500/30 bg-red-500/10 text-red-400",
+                            )}
+                          >
+                            Green {psychDetails.greenPass ? "✓" : "✕"}
+                          </span>
+                          <span
+                            className={cn(
+                              "inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-[10px]",
+                              psychDetails.secondGreenPass
+                                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                                : "border-red-500/30 bg-red-500/10 text-red-400",
+                            )}
+                          >
+                            2nd Green {psychDetails.secondGreenPass ? "✓" : "✕"}
+                          </span>
+                          <span
+                            className={cn(
+                              "inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-[10px]",
+                              psychDetails.redPass
+                                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                                : "border-red-500/30 bg-red-500/10 text-red-400",
+                            )}
+                          >
+                            Red {psychDetails.redPass ? "✓" : "✕"}
+                          </span>
+                          <span
+                            className={cn(
+                              "inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-[10px]",
+                              psychDetails.secondRedPass
+                                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                                : "border-red-500/30 bg-red-500/10 text-red-400",
+                            )}
+                          >
+                            2nd Red {psychDetails.secondRedPass ? "✓" : "✕"}
+                          </span>
+                          <span
+                            className={cn(
+                              "inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-[10px]",
+                              psychDetails.purplePass
+                                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                                : "border-red-500/30 bg-red-500/10 text-red-400",
+                            )}
+                          >
+                            Purple {psychDetails.purplePass ? "✓" : "✕"}
+                          </span>
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded border border-border text-[10px] text-muted-foreground">
+                            Sentinel {psychDetails.sentinelStatus}
+                          </span>
+                        </div>
+
+                        {psychDetails.reasons.length > 0 && (
+                          <div className="pt-1 text-[10px] font-mono text-warning/90 space-y-0.5">
+                            <span className="font-semibold text-muted-foreground">Reason:</span>
+                            {psychDetails.reasons.map((r, i) => (
+                              <div key={i} className="text-warning/90">
+                                • {r}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* WHY #1 DYNAMIC SECTION */}
               <div className="rounded-md border border-signal/30 bg-signal/5 p-3 space-y-2">
                 <div className="flex items-center gap-2 text-xs font-bold text-signal uppercase tracking-wider">
@@ -650,6 +931,21 @@ export function BestLiquidityPanel({
 
                   <div className="rounded bg-surface p-2 text-[11px] space-y-1 border border-border">
                     <div className="flex justify-between text-muted-foreground">
+                      <span>Liquidity Level:</span>
+                      <span className="text-foreground font-semibold">
+                        {Math.round(bestQualified.liquidityLevel ?? bestQualified.liquidityScore)}%
+                        ({getLiquidityTrendInfo(bestQualified.liquidityTrend ?? 0).label})
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>Psychology Adherence:</span>
+                      <span className="text-foreground font-semibold">
+                        {Math.round(bestQualified.psychologyAdherence ?? 50)}% (
+                        {getPsychologyAdherenceLabel(bestQualified.psychologyAdherence ?? 50).label}
+                        )
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-muted-foreground">
                       <span>Delivery:</span>
                       <span className="text-foreground font-semibold">
                         {bestQualified.deliveryScore}%
@@ -791,6 +1087,8 @@ export function BestLiquidityPanel({
                     <th className="pb-1.5 font-medium">Rank</th>
                     <th className="pb-1.5 font-medium">Market / Contract</th>
                     <th className="pb-1.5 font-medium">Score</th>
+                    <th className="pb-1.5 font-medium">Liquidity</th>
+                    <th className="pb-1.5 font-medium">Psychology</th>
                     <th className="pb-1.5 font-medium">Phase</th>
                     <th className="pb-1.5 font-medium">Trajectory</th>
                     <th className="pb-1.5 font-medium">Qualification</th>
@@ -827,6 +1125,27 @@ export function BestLiquidityPanel({
                         <div className="text-[9px] text-muted-foreground">{item.zoneId}</div>
                       </td>
                       <td className="py-2 text-signal font-bold">{item.score.toFixed(1)}</td>
+                      <td className="py-2 text-[11px]">
+                        <span className="font-semibold text-foreground">
+                          {Math.round(item.liquidityLevel ?? item.liquidityScore)}%
+                        </span>
+                        <span className="text-[9px] text-muted-foreground ml-1">
+                          {(item.liquidityTrend ?? 0) >= 0 ? "+" : ""}
+                          {item.liquidityTrend ?? 0}
+                        </span>
+                      </td>
+                      <td className="py-2 text-[11px]">
+                        <span
+                          className={cn(
+                            "px-1.5 py-0.5 rounded text-[10px] font-semibold",
+                            getPsychologyAdherenceLabel(item.psychologyAdherence ?? 50)
+                              .badgeClassName,
+                          )}
+                        >
+                          {Math.round(item.psychologyAdherence ?? 50)}%{" "}
+                          {getPsychologyAdherenceLabel(item.psychologyAdherence ?? 50).label}
+                        </span>
+                      </td>
                       <td className="py-2">
                         <StateTag state={item.lifecycleState} />
                       </td>

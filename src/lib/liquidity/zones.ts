@@ -135,6 +135,10 @@ export interface EvidenceSnapshot {
 
   rankingScore: number;
   qualificationStatus: string;
+
+  // Restored signal indicators
+  liquidityLevel: number;
+  psychologyAdherence: number;
 }
 
 export interface FormationTrajectoryData {
@@ -160,6 +164,31 @@ export interface PhaseTransition {
   reason: string;
 }
 
+export interface PsychologyComplianceDetails {
+  greenCompliant: boolean;
+  greenPass?: boolean;
+  secondGreenCompliant: boolean;
+  secondGreenPass?: boolean;
+  redCompliant: boolean;
+  redPass?: boolean;
+  secondRedCompliant: boolean;
+  secondRedPass?: boolean;
+  purpleCompliant: boolean;
+  purplePass?: boolean;
+  sentinelStatus: "ACCEPT" | "WATCH" | "REJECT";
+  adherenceScore: number;
+  reasons: string[];
+}
+
+export interface LiquidityComposition {
+  reservoir: number;
+  maturation: number;
+  exhaustion: number;
+  delivery: number;
+  persistence: number;
+  structure: number;
+}
+
 export interface ZoneEvent {
   id: string;
   at: number;
@@ -172,6 +201,9 @@ export interface ZoneEvent {
   description: string;
   state: ZoneLifecycleState;
   evidenceSummary: string;
+  liquidityLevel?: number;
+  psychologyAdherence?: number;
+  rankScore?: number;
 }
 
 export interface LiquidityZone {
@@ -204,6 +236,14 @@ export interface LiquidityZone {
 
   initialPsychology: SentinelPsychologySnapshot;
   currentPsychology: SentinelPsychologySnapshot;
+
+  // Restored First-Class Signal Indicators
+  liquidityLevel: number;
+  liquidityTrend: number;
+  liquidityAcceleration: number;
+  psychologyAdherence: number;
+  psychologyDetails: PsychologyComplianceDetails;
+  liquidityComposition: LiquidityComposition;
 
   reservoirDigits: number[];
   dominantDigits: number[];
@@ -244,6 +284,8 @@ export interface LiquidityZone {
   temporal?: Record<number, DigitTemporal>;
   transitions?: TransitionEvidence[];
 }
+
+export type Formation = LiquidityZone;
 
 export interface ZoneCandidate {
   candidateId: string;
@@ -302,6 +344,243 @@ function generateDeterministicZoneId(
   const shortSym = symbol.replace(/[^A-Za-z0-9]/g, "");
   const genStr = `GEN-${String(generation).padStart(2, "0")}`;
   return `${shortSym}-${contractId}-${genStr}`;
+}
+
+/**
+ * Authoritatively calculates psychology adherence (0-100) and compliance breakdown
+ * directly against Sentinel psychology rules.
+ */
+export function calculatePsychologyAdherence(
+  psych: SentinelPsychologySnapshot,
+  side: "OVER" | "UNDER",
+  barrier: number,
+  reservoirDigits: number[] = [],
+): { adherence: number; details: PsychologyComplianceDetails } {
+  const resDigits = Array.isArray(reservoirDigits) ? reservoirDigits : [];
+  const winners = [...Array(10).keys()].filter((d) =>
+    side === "OVER" ? d > barrier : d < barrier,
+  );
+  const losers = [...Array(10).keys()].filter((d) => !winners.includes(d));
+
+  const reasons: string[] = [];
+
+  // 1. Red Compliance (max 25 pts)
+  const redInWinners = winners.includes(psych.red);
+  let redParityCompliant = true;
+  if (side === "UNDER") {
+    if (psych.red % 2 !== 0 || psych.red === 8) {
+      redParityCompliant = false;
+    }
+  } else {
+    if (psych.red % 2 === 0 || psych.red === 1) {
+      redParityCompliant = false;
+    }
+  }
+  const redCompliant = redInWinners && redParityCompliant;
+  let redScore = 0;
+  if (redInWinners) {
+    redScore += 15;
+    if (redParityCompliant) redScore += 10;
+  } else {
+    reasons.push(`Red d${psych.red} is losing-side`);
+  }
+  if (redInWinners && !redParityCompliant) {
+    reasons.push(
+      side === "UNDER"
+        ? `UNDER Red d${psych.red} must be even and never 8`
+        : `OVER Red d${psych.red} must be odd and never 1`,
+    );
+  }
+
+  // 2. Green Compliance (max 20 pts)
+  const greenInWinners = winners.includes(psych.green);
+  let greenCompliant = false;
+  let greenScore = 0;
+  const gp = psych.pct[psych.green] ?? 0.1;
+  const gPressure = psych.pressure[psych.green] ?? 0;
+
+  if (greenInWinners) {
+    const parityOk = side === "UNDER" ? psych.green % 2 !== 0 : psych.green % 2 === 0;
+    if (parityOk) {
+      greenCompliant = true;
+      greenScore = 20;
+    } else {
+      greenScore = 10;
+      reasons.push(
+        side === "UNDER"
+          ? `UNDER Green d${psych.green} must be odd`
+          : `OVER Green d${psych.green} must be even`,
+      );
+    }
+  } else {
+    // Conditional Green on losing side
+    if (gp >= 0.105 && gPressure <= 0.005) {
+      greenCompliant = true;
+      greenScore = 18;
+    } else if (gp >= 0.105) {
+      greenScore = 12;
+      reasons.push(`Green d${psych.green} is elevated but still increasing on losing side`);
+    } else {
+      greenScore = 4;
+      reasons.push(`Green d${psych.green} is losing-side and below 10.5% exhaustion`);
+    }
+  }
+
+  // 3. Second Red Compliance (max 15 pts)
+  const secondRedCompliant = winners.includes(psych.secondRed);
+  const secondRedScore = secondRedCompliant ? 15 : 0;
+  if (!secondRedCompliant) {
+    reasons.push(`2nd Red d${psych.secondRed} is in losing zone`);
+  }
+
+  // 4. Second Green Compliance (max 10 pts)
+  const secondGreenCompliant = winners.includes(psych.secondGreen);
+  const secondGreenScore = secondGreenCompliant ? 10 : 2;
+  if (!secondGreenCompliant) {
+    reasons.push(`2nd Green d${psych.secondGreen} is in losing zone`);
+  }
+
+  // 5. Purple Compliance (max 15 pts)
+  let purpleCompliant = true;
+  let purpleScore = 10;
+  if (psych.purple !== null) {
+    const purpleInWinners = winners.includes(psych.purple);
+    purpleCompliant = purpleInWinners;
+    if (purpleInWinners) {
+      const alignsReservoir = resDigits.includes(psych.purple);
+      purpleScore = alignsReservoir ? 15 : 12;
+    } else {
+      purpleScore = 0;
+      reasons.push(`Purple d${psych.purple} is growing in losing zone`);
+    }
+  } else {
+    purpleScore = 12; // Distributed, neutral
+  }
+
+  // 6. Losing Bars Count (max 15 pts)
+  const bars = [
+    psych.green,
+    psych.secondGreen,
+    psych.red,
+    psych.secondRed,
+    ...(psych.purple !== null ? [psych.purple] : []),
+  ];
+  const losingBarsCount = bars.filter((d) => losers.includes(d)).length;
+  let losingBarsScore = 15;
+  if (losingBarsCount === 1) losingBarsScore = 11;
+  else if (losingBarsCount === 2) losingBarsScore = 7;
+  else if (losingBarsCount >= 3) {
+    losingBarsScore = 0;
+    reasons.push(`${losingBarsCount}/5 psychological bars in losing zone`);
+  }
+
+  let rawTotal =
+    redScore + greenScore + secondRedScore + secondGreenScore + purpleScore + losingBarsScore;
+
+  if (psych.valid) {
+    rawTotal = Math.max(82, rawTotal);
+  } else if (psych.outcome === "REJECT") {
+    rawTotal = Math.min(64, rawTotal);
+  } else if (psych.outcome === "WATCH") {
+    rawTotal = Math.min(84, rawTotal);
+  }
+
+  const adherence = clamp(Math.round(rawTotal), 0, 100);
+
+  return {
+    adherence,
+    details: {
+      greenCompliant,
+      greenPass: greenCompliant,
+      secondGreenCompliant,
+      secondGreenPass: secondGreenCompliant,
+      redCompliant,
+      redPass: redCompliant,
+      secondRedCompliant,
+      secondRedPass: secondRedCompliant,
+      purpleCompliant,
+      purplePass: purpleCompliant,
+      sentinelStatus: psych.outcome ?? (psych.valid ? "ACCEPT" : "REJECT"),
+      adherenceScore: adherence,
+      reasons: reasons.length > 0 ? reasons : ["All Sentinel psychological constraints verified"],
+    },
+  };
+}
+
+/**
+ * Calculates continuous formation-specific liquidity level (0-100),
+ * trend, and multi-dimensional composition.
+ */
+export function calculateLiquidityLevel(
+  acc: EvidenceAccumulators,
+  ageTicks: number,
+  psych: SentinelPsychologySnapshot,
+  previousLevel?: number,
+  previousTrend = 0,
+): {
+  level: number;
+  trend: number;
+  acceleration: number;
+  composition: LiquidityComposition;
+} {
+  const reservoir = clamp(acc.reservoirPersistence);
+  const maturation = clamp(ageTicks * 3.5, 5, 100);
+  const exhaustion = clamp(acc.dominantExhaustion);
+  const delivery = clamp(acc.delivery);
+  const persistence = clamp(
+    (ageTicks >= 16 ? 75 : (ageTicks / 16) * 75) + (acc.delivery > 40 ? 25 : 0),
+    10,
+    100,
+  );
+  const structure = clamp(100 - acc.conflict * 0.7 - (psych.valid ? 0 : 25), 10, 100);
+
+  const composition: LiquidityComposition = {
+    reservoir: Math.round(reservoir),
+    maturation: Math.round(maturation),
+    exhaustion: Math.round(exhaustion),
+    delivery: Math.round(delivery),
+    persistence: Math.round(persistence),
+    structure: Math.round(structure),
+  };
+
+  // Lifecycle progression:
+  // Reservoir creation (0.20) -> Maturation (0.16) -> Exhaustion (0.20) -> Delivery (0.20) -> Persistence (0.12) -> Structure (0.12)
+  const weighted =
+    reservoir * 0.2 +
+    maturation * 0.16 +
+    exhaustion * 0.2 +
+    delivery * 0.2 +
+    persistence * 0.12 +
+    structure * 0.12;
+
+  // Single-tick / early formation damping:
+  // A single high-score tick must NOT create a high liquidity level.
+  let maturationDamping = 1.0;
+  if (ageTicks <= 1) {
+    maturationDamping = 0.25;
+  } else if (ageTicks < 6) {
+    maturationDamping = 0.45 + (ageTicks / 6) * 0.25;
+  } else if (ageTicks < 14) {
+    maturationDamping = 0.7 + ((ageTicks - 6) / 8) * 0.3;
+  }
+
+  const rawLevel = clamp(weighted * maturationDamping, 0, 100);
+
+  // Smooth update if previous level exists
+  const level =
+    previousLevel !== undefined
+      ? Math.round(clamp(previousLevel * 0.85 + rawLevel * 0.15, 0, 100))
+      : Math.round(rawLevel);
+
+  const trend = Number((level - (previousLevel ?? level)).toFixed(2));
+  const acceleration = Number((trend - previousTrend).toFixed(2));
+
+  return {
+    level,
+    trend,
+    acceleration,
+    composition,
+  };
 }
 
 export class ZoneRegistry {
@@ -503,6 +782,14 @@ export class ZoneRegistry {
       lastMeaningfulChange: now,
     };
 
+    const psychAdherenceRes = calculatePsychologyAdherence(
+      psych,
+      candidate.kind,
+      candidate.barrier,
+      reservoirDigits,
+    );
+    const liquidityRes = calculateLiquidityLevel(initialAccumulators, 1, psych, undefined, 0);
+
     const zone: LiquidityZone = {
       zoneId,
       id: zoneId,
@@ -532,6 +819,13 @@ export class ZoneRegistry {
 
       initialPsychology: psych,
       currentPsychology: psych,
+
+      liquidityLevel: liquidityRes.level,
+      liquidityTrend: liquidityRes.trend,
+      liquidityAcceleration: liquidityRes.acceleration,
+      psychologyAdherence: psychAdherenceRes.adherence,
+      psychologyDetails: psychAdherenceRes.details,
+      liquidityComposition: liquidityRes.composition,
 
       reservoirDigits,
       dominantDigits,
@@ -698,6 +992,29 @@ export class ZoneRegistry {
       acc.accumulatedLiquidity * 0.985 + netAddition - decayPenalty - contradictionPenalty,
     );
 
+    // Update Psychology Adherence
+    const psychAdherenceRes = calculatePsychologyAdherence(
+      psych,
+      z.kind,
+      z.barrier,
+      reservoirDigits,
+    );
+    z.psychologyAdherence = psychAdherenceRes.adherence;
+    z.psychologyDetails = psychAdherenceRes.details;
+
+    // Update continuous Liquidity Level & Composition
+    const liquidityRes = calculateLiquidityLevel(
+      acc,
+      z.ageTicks,
+      psych,
+      z.liquidityLevel,
+      z.liquidityTrend,
+    );
+    z.liquidityLevel = liquidityRes.level;
+    z.liquidityTrend = liquidityRes.trend;
+    z.liquidityAcceleration = liquidityRes.acceleration;
+    z.liquidityComposition = liquidityRes.composition;
+
     if (newStructuralEvidence > 55) {
       z.lastMeaningfulEvidenceTick = currentTick;
     }
@@ -717,6 +1034,8 @@ export class ZoneRegistry {
         migrationScore: Math.round(acc.migration),
         absorptionScore: Math.round(acc.absorption),
         psychologyValidity: psych.valid,
+        liquidityLevel: z.liquidityLevel,
+        psychologyAdherence: z.psychologyAdherence,
         dominantDigits: [...dominantDigits],
         reservoirDigits: [...reservoirDigits],
         dominantRate: mean(dominantDigits.map((d) => psych.pct[d] ?? 0.1)),
@@ -1112,7 +1431,10 @@ export class ZoneRegistry {
       type,
       description,
       state,
-      evidenceSummary: `Liq: ${z.accumulators.accumulatedLiquidity.toFixed(0)} | Exh: ${z.accumulators.dominantExhaustion.toFixed(0)} | Del: ${z.accumulators.delivery.toFixed(0)}`,
+      evidenceSummary: `Liq: ${z.liquidityLevel ?? Math.round(z.accumulators.accumulatedLiquidity)}% (${(z.liquidityTrend ?? 0) >= 0 ? "+" : ""}${z.liquidityTrend ?? 0}) | Psych: ${z.psychologyAdherence ?? 50}% | Exh: ${z.accumulators.dominantExhaustion.toFixed(0)}% · Del: ${z.accumulators.delivery.toFixed(0)}%`,
+      liquidityLevel: z.liquidityLevel,
+      psychologyAdherence: z.psychologyAdherence,
+      rankScore: z.rankingScore,
     };
 
     z.ledger.unshift(ev);

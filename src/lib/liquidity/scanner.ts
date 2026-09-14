@@ -18,13 +18,17 @@
  */
 
 import { clamp, mean } from "./math";
-import type {
-  LiquidityZone,
-  ZoneLifecycleState,
-  ZoneRegistry,
-  FormationTimelineEvent,
-  EvidenceSnapshot,
-  FormationTrajectoryData,
+import {
+  type LiquidityZone,
+  type ZoneLifecycleState,
+  type ZoneRegistry,
+  type FormationTimelineEvent,
+  type EvidenceSnapshot,
+  type FormationTrajectoryData,
+  type PsychologyComplianceDetails,
+  type LiquidityComposition,
+  calculatePsychologyAdherence,
+  calculateLiquidityLevel,
 } from "./zones";
 
 export const COOLDOWN_SECONDS = 60;
@@ -121,6 +125,14 @@ export interface ScanResult {
   formattedTime: string;
   rankHoldTimeSeconds: number;
 
+  // Restored First-Class Signal Indicators
+  liquidityLevel: number;
+  liquidityTrend: number;
+  liquidityAcceleration: number;
+  psychologyAdherence: number;
+  psychologyDetails: PsychologyComplianceDetails;
+  liquidityComposition: LiquidityComposition;
+
   // Authoritative metrics derived from engines
   psychologyScore: number;
   psychologyValidity: "VALID" | "WATCH" | "REJECT";
@@ -166,6 +178,8 @@ export interface ScanResult {
   isInvalidated: boolean;
   invalidationReason?: string | null;
 }
+
+export type RankedFormation = ScanResult;
 
 export interface SuperiorityEvaluation {
   isSuperior: boolean;
@@ -778,6 +792,27 @@ export function buildScanResult(
   const durationTicks = Math.max(1, zone.currentTick - zone.formationStartTick);
   const explanation = explainFormationRanking(zone, runnerUp);
 
+  const psychAdherenceRes =
+    zone.psychologyAdherence !== undefined && zone.psychologyDetails
+      ? { adherence: zone.psychologyAdherence, details: zone.psychologyDetails }
+      : calculatePsychologyAdherence(psych, zone.kind, zone.barrier, zone.reservoirDigits);
+
+  const liquidityRes =
+    zone.liquidityComposition && zone.liquidityLevel !== undefined
+      ? {
+          level: zone.liquidityLevel,
+          trend: zone.liquidityTrend ?? 0,
+          acceleration: zone.liquidityAcceleration ?? 0,
+          composition: zone.liquidityComposition,
+        }
+      : calculateLiquidityLevel(
+          acc,
+          zone.ageTicks,
+          psych,
+          zone.liquidityLevel,
+          zone.liquidityTrend,
+        );
+
   return {
     zoneId: zone.zoneId,
     generation: zone.generation ?? 1,
@@ -794,6 +829,20 @@ export function buildScanResult(
     scannedAt: now,
     formattedTime: formatScanTime(now),
     rankHoldTimeSeconds,
+
+    // Restored First-Class Signal Indicators
+    liquidityLevel: zone.liquidityLevel !== undefined ? zone.liquidityLevel : liquidityRes.level,
+    liquidityTrend: zone.liquidityTrend !== undefined ? zone.liquidityTrend : liquidityRes.trend,
+    liquidityAcceleration:
+      zone.liquidityAcceleration !== undefined
+        ? zone.liquidityAcceleration
+        : liquidityRes.acceleration,
+    psychologyAdherence:
+      zone.psychologyAdherence !== undefined
+        ? zone.psychologyAdherence
+        : psychAdherenceRes.adherence,
+    psychologyDetails: zone.psychologyDetails ?? psychAdherenceRes.details,
+    liquidityComposition: zone.liquidityComposition ?? liquidityRes.composition,
 
     psychologyScore,
     psychologyValidity: psych.valid ? "VALID" : psych.outcome === "WATCH" ? "WATCH" : "REJECT",

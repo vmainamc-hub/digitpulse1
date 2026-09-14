@@ -161,21 +161,42 @@ export function ZoneCard({
           </div>
         </div>
 
-        {/* Cumulative Liquidity Level */}
-        <div className="mt-2.5">
-          <div className="flex items-baseline justify-between">
-            <span className="mono-label text-[10px] text-muted-foreground">
-              Accumulated Liquidity
-            </span>
-            <span className="tabular font-mono text-xs font-semibold text-signal">
-              {Math.round(acc.accumulatedLiquidity)}/100
-            </span>
+        {/* Cumulative Liquidity Level & Psychology Adherence */}
+        <div className="mt-2.5 space-y-2">
+          <div>
+            <div className="flex items-baseline justify-between">
+              <span className="mono-label text-[10px] text-muted-foreground">Liquidity Level</span>
+              <span className="tabular font-mono text-xs font-semibold text-signal">
+                {zone.liquidityLevel ?? Math.round(acc.accumulatedLiquidity)}% (
+                {zone.liquidityTrend !== undefined && zone.liquidityTrend >= 0 ? "+" : ""}
+                {zone.liquidityTrend ?? 0})
+              </span>
+            </div>
+            <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-signal transition-all duration-500"
+                style={{
+                  width: `${Math.max(4, zone.liquidityLevel ?? acc.accumulatedLiquidity)}%`,
+                }}
+              />
+            </div>
           </div>
-          <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full rounded-full bg-signal transition-all duration-500"
-              style={{ width: `${Math.max(4, acc.accumulatedLiquidity)}%` }}
-            />
+
+          <div>
+            <div className="flex items-baseline justify-between">
+              <span className="mono-label text-[10px] text-muted-foreground">
+                Psychology Adherence
+              </span>
+              <span className="tabular font-mono text-xs font-semibold text-calm">
+                {zone.psychologyAdherence ?? 50}%
+              </span>
+            </div>
+            <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-calm transition-all duration-500"
+                style={{ width: `${Math.max(4, zone.psychologyAdherence ?? 50)}%` }}
+              />
+            </div>
           </div>
         </div>
 
@@ -301,6 +322,16 @@ export function ZoneProvenance({ zone }: { zone: LiquidityZone }) {
         subtitle="Independent accumulators build over time — never a volatile tick score"
       >
         <div className="space-y-2">
+          <Meter
+            label="Liquidity Level (Continuous)"
+            value={zone.liquidityLevel ?? acc.accumulatedLiquidity}
+            tone="signal"
+          />
+          <Meter
+            label="Psychology Adherence (Sentinel Rules)"
+            value={zone.psychologyAdherence ?? 50}
+            tone="calm"
+          />
           <Meter
             label="Accumulated Liquidity Formation"
             value={acc.accumulatedLiquidity}
