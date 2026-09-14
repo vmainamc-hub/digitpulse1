@@ -237,6 +237,9 @@ export interface LiquidityZone {
   rankingScore: number;
   isTerminal: boolean;
 
+  // Milestone deduplication set
+  milestones?: Set<string>;
+
   // Multi-window telescope from underlying analysis
   temporal?: Record<number, DigitTemporal>;
   transitions?: TransitionEvidence[];
@@ -268,6 +271,7 @@ export interface ZoneRegistrySnapshot {
   activeCount: number;
   qualifiedCount: number;
   invalidatedCount: number;
+  historicalCount: number;
 }
 
 const MIN_CANDIDATE_PERSISTENCE_TICKS = 12;
@@ -804,11 +808,13 @@ export class ZoneRegistry {
   }
 
   private checkMilestones(z: LiquidityZone, now: number) {
+    if (!z.milestones) z.milestones = new Set<string>();
     const acc = z.accumulators;
     const psych = z.currentPsychology;
 
     // Reservoir Formed
-    if (acc.reservoirPersistence >= 55 && !this.hasRecentEvent(z, "RESERVOIR_FORMED")) {
+    if (acc.reservoirPersistence >= 55 && !z.milestones.has("RESERVOIR_FORMED")) {
+      z.milestones.add("RESERVOIR_FORMED");
       this.logTimelineEvent(
         z,
         "RESERVOIR_FORMED",
@@ -819,7 +825,8 @@ export class ZoneRegistry {
     }
 
     // Dominant Side Weakened
-    if (acc.dominantExhaustion >= 55 && !this.hasRecentEvent(z, "DOMINANT_WEAKENED")) {
+    if (acc.dominantExhaustion >= 55 && !z.milestones.has("DOMINANT_WEAKENED")) {
+      z.milestones.add("DOMINANT_WEAKENED");
       this.logTimelineEvent(
         z,
         "DOMINANT_WEAKENED",
@@ -830,7 +837,8 @@ export class ZoneRegistry {
     }
 
     // Exhaustion Confirmed
-    if (acc.dominantExhaustion >= 72 && !this.hasRecentEvent(z, "EXHAUSTION_CONFIRMED")) {
+    if (acc.dominantExhaustion >= 72 && !z.milestones.has("EXHAUSTION_CONFIRMED")) {
+      z.milestones.add("EXHAUSTION_CONFIRMED");
       this.logTimelineEvent(
         z,
         "EXHAUSTION_CONFIRMED",
@@ -841,7 +849,8 @@ export class ZoneRegistry {
     }
 
     // Delivery Started
-    if (acc.delivery >= 45 && !this.hasRecentEvent(z, "DELIVERY_STARTED")) {
+    if (acc.delivery >= 45 && !z.milestones.has("DELIVERY_STARTED")) {
+      z.milestones.add("DELIVERY_STARTED");
       this.logTimelineEvent(
         z,
         "DELIVERY_STARTED",
@@ -852,7 +861,8 @@ export class ZoneRegistry {
     }
 
     // Delivery Strengthened
-    if (acc.delivery >= 68 && !this.hasRecentEvent(z, "DELIVERY_STRENGTHENED")) {
+    if (acc.delivery >= 68 && !z.milestones.has("DELIVERY_STRENGTHENED")) {
+      z.milestones.add("DELIVERY_STRENGTHENED");
       this.logTimelineEvent(
         z,
         "DELIVERY_STRENGTHENED",
@@ -863,7 +873,8 @@ export class ZoneRegistry {
     }
 
     // Migration Detected
-    if (acc.migration >= 45 && !this.hasRecentEvent(z, "MIGRATION_DETECTED")) {
+    if (acc.migration >= 45 && !z.milestones.has("MIGRATION_DETECTED")) {
+      z.milestones.add("MIGRATION_DETECTED");
       this.logTimelineEvent(
         z,
         "MIGRATION_DETECTED",
@@ -877,8 +888,9 @@ export class ZoneRegistry {
     if (
       psych.purple !== null &&
       z.reservoirDigits.includes(psych.purple) &&
-      !this.hasRecentEvent(z, "PURPLE_ALIGNMENT")
+      !z.milestones.has("PURPLE_ALIGNMENT")
     ) {
+      z.milestones.add("PURPLE_ALIGNMENT");
       this.logTimelineEvent(
         z,
         "PURPLE_ALIGNMENT",
@@ -1066,6 +1078,12 @@ export class ZoneRegistry {
     description: string,
     phase: ZoneLifecycleState,
   ) {
+    // Prevent duplicate consecutive timeline events
+    const last = z.timeline[z.timeline.length - 1];
+    if (last && last.type === type && last.phase === phase && last.description === description) {
+      return;
+    }
+
     const ev: FormationTimelineEvent = {
       id: `FTL-${++globalTimelineSeq}`,
       at: Date.now(),
@@ -1113,17 +1131,21 @@ export class ZoneRegistry {
 
     const activeList: LiquidityZone[] = [];
     const historicalList: LiquidityZone[] = [...this.historical];
+    const newCreationOrder: string[] = [];
 
     for (const key of this.creationOrder) {
       const z = this.zones.get(key);
       if (!z) continue;
 
-      if (z.isTerminal) {
+      if (z.isTerminal || z.lifecycleState === "INVALIDATED") {
         historicalList.unshift(z);
+        this.zones.delete(key);
       } else {
         activeList.push(z);
+        newCreationOrder.push(key);
       }
     }
+    this.creationOrder = newCreationOrder;
 
     if (historicalList.length > 60) historicalList.length = 60;
     this.historical = historicalList;
@@ -1160,6 +1182,7 @@ export class ZoneRegistry {
       activeCount: activeList.length,
       qualifiedCount: activeList.filter((z) => z.qualified).length,
       invalidatedCount: this.historical.length,
+      historicalCount: this.historical.length,
     };
 
     return this.snapshot;
@@ -1174,3 +1197,8 @@ export function getZoneRegistry(): ZoneRegistry {
   }
   return registryInstance;
 }
+
+// Canonical Aliases
+export type LiquidityFormation = LiquidityZone;
+export type FormationRegistry = ZoneRegistry;
+export { getZoneRegistry as getFormationRegistry };

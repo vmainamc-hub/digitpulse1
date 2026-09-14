@@ -57,11 +57,114 @@ const POLL_INTERVAL = 2_500;
 const TICK_SILENCE_MS = 3_000;
 const MARKET_STALE_MS = 20_000;
 
-type PendingKind = "ACTIVE_SYMBOLS" | "HISTORY" | "SUBSCRIBE" | "PING";
-interface Pending {
+export type PendingKind = "ACTIVE_SYMBOLS" | "HISTORY" | "SUBSCRIBE" | "PING";
+export interface Pending {
   kind: PendingKind;
   symbol?: string;
   at: number;
+}
+
+export interface CorrelationMatch {
+  matchedBy: "req_id" | "echo_req" | "none";
+  reqId?: number;
+  symbol?: string;
+  kind?: PendingKind;
+}
+
+/**
+ * Pure request correlation: prefers req_id over assuming echo_req is always available.
+ */
+export function correlateFeedMessage(
+  msg: Record<string, unknown>,
+  pending: Map<number, Pending>,
+): CorrelationMatch {
+  const reqId = Number(msg["req_id"] ?? 0);
+  if (reqId && pending.has(reqId)) {
+    const item = pending.get(reqId)!;
+    return {
+      matchedBy: "req_id",
+      reqId,
+      symbol: item.symbol,
+      kind: item.kind,
+    };
+  }
+
+  const echo = msg["echo_req"] as Record<string, unknown> | undefined;
+  if (echo) {
+    const symbol =
+      (typeof echo["ticks_history"] === "string" ? echo["ticks_history"] : undefined) ??
+      (typeof echo["ticks"] === "string" ? echo["ticks"] : undefined);
+    return {
+      matchedBy: "echo_req",
+      symbol,
+    };
+  }
+
+  return { matchedBy: "none" };
+}
+
+/**
+ * Validates a tick payload from the WebSocket stream.
+ */
+export function validateFeedTick(raw: unknown): {
+  valid: boolean;
+  symbol?: string;
+  quote?: number;
+  epoch?: number;
+  pipSize?: number;
+} {
+  if (!raw || typeof raw !== "object") return { valid: false };
+  const t = raw as Record<string, unknown>;
+  const symbol = typeof t["symbol"] === "string" ? t["symbol"] : undefined;
+  const quote = Number(t["quote"]);
+  const epoch = Number(t["epoch"] ?? 0);
+  const pipSize = typeof t["pip_size"] === "number" ? t["pip_size"] : undefined;
+
+  if (!symbol || !UNIVERSE.some((m) => m.symbol === symbol)) {
+    return { valid: false };
+  }
+  if (!Number.isFinite(quote) || !Number.isFinite(epoch) || epoch <= 0) {
+    return { valid: false };
+  }
+
+  return { valid: true, symbol, quote, epoch, pipSize };
+}
+
+/**
+ * Validates a history payload from the WebSocket stream.
+ */
+export function validateHistoryPayload(raw: unknown): {
+  valid: boolean;
+  prices: number[];
+  times: number[];
+} {
+  if (!raw || typeof raw !== "object") return { valid: false, prices: [], times: [] };
+  const h = raw as Record<string, unknown>;
+  const rawPrices = Array.isArray(h["prices"]) ? h["prices"] : [];
+  const rawTimes = Array.isArray(h["times"]) ? h["times"] : [];
+
+  if (rawPrices.length === 0 || rawPrices.length !== rawTimes.length) {
+    return { valid: false, prices: [], times: [] };
+  }
+
+  const prices: number[] = [];
+  const times: number[] = [];
+  let lastTime = -1;
+
+  for (let i = 0; i < rawPrices.length; i++) {
+    const p = Number(rawPrices[i]);
+    const tm = Number(rawTimes[i]);
+    if (Number.isFinite(p) && Number.isFinite(tm) && tm > 0) {
+      if (tm > lastTime) {
+        prices.push(p);
+        times.push(tm);
+        lastTime = tm;
+      }
+    }
+  }
+
+  if (prices.length === 0) return { valid: false, prices: [], times: [] };
+  return { valid: true, prices, times };
 }
 
 class DerivFeed {
@@ -279,15 +382,16 @@ class DerivFeed {
       }
       this.lastMessageAt = Date.now();
 
-      const reqId = Number(msg["req_id"] ?? 0);
-      const pending = reqId ? this.pending.get(reqId) : undefined;
-      if (reqId) this.pending.delete(reqId);
+      const correlation = correlateFeedMessage(msg, this.pending);
+      if (correlation.reqId) {
+        this.pending.delete(correlation.reqId);
+      }
 
       if (msg["error"]) {
         // A rejected subscription must not freeze the market — history polling
         // continues to advance it.
-        const symbol = pending?.symbol;
-        if (symbol && pending?.kind === "HISTORY") {
+        const symbol = correlation.symbol;
+        if (symbol && correlation.kind === "HISTORY") {
           const state = this.states.get(symbol);
           if (state && !state.history.length) state.status = "UNAVAILABLE";
           this.dirty = true;
@@ -309,13 +413,9 @@ class DerivFeed {
       }
 
       if (msg["msg_type"] === "history") {
-        const echo = msg["echo_req"] as { ticks_history?: string } | undefined;
-        const symbol = pending?.symbol ?? echo?.ticks_history;
-        const history = msg["history"] as
-          { prices?: (number | string)[]; times?: number[] } | undefined;
-        const prices = history?.prices ?? [];
-        const times = history?.times ?? [];
-        if (!symbol || !prices.length) return;
+        const historyValidation = validateHistoryPayload(msg["history"]);
+        const symbol = correlation.symbol;
+        if (!symbol || !historyValidation.valid) return;
         const state = this.states.get(symbol);
         if (!state) return;
 
@@ -325,14 +425,13 @@ class DerivFeed {
             : (state.pip_size ?? getMarketPipSize(symbol));
         state.pip_size = pipSize;
 
-        const bootstrap: Tick[] = prices.map((q, i) => {
-          const numQ = Number(q);
-          return {
-            q: numQ,
-            d: lastDigit(numQ, pipSize),
-            t: Number(times[i] ?? 0),
-          };
-        });
+        const { prices, times } = historyValidation;
+        const bootstrap: Tick[] = prices.map((q, i) => ({
+          q,
+          d: lastDigit(q, pipSize),
+          t: times[i],
+        }));
+
         const prevLastTime = state.history[state.history.length - 1]?.t ?? 0;
         const lastBootstrapTime = bootstrap[bootstrap.length - 1]?.t ?? 0;
         const newer = state.history.filter((t) => t.t > lastBootstrapTime);
@@ -355,26 +454,24 @@ class DerivFeed {
       }
 
       if (msg["msg_type"] === "tick") {
-        const tick = msg["tick"] as
-          | { symbol?: string; quote?: number | string; epoch?: number; pip_size?: number }
-          | undefined;
-        const symbol = tick?.symbol ?? pending?.symbol;
-        if (!symbol || !tick) return;
+        const tickValidation = validateFeedTick(msg["tick"]);
+        const symbol = tickValidation.symbol ?? correlation.symbol;
+        if (!symbol || !tickValidation.valid) return;
         const state = this.states.get(symbol);
         if (!state) return;
-        const q = Number(tick.quote);
-        if (!Number.isFinite(q)) return;
-        const pipSize =
-          typeof tick.pip_size === "number"
-            ? tick.pip_size
-            : (state.pip_size ?? getMarketPipSize(symbol));
+
+        const q = tickValidation.quote!;
+        const epoch = tickValidation.epoch!;
+        const pipSize = tickValidation.pipSize ?? state.pip_size ?? getMarketPipSize(symbol);
         state.pip_size = pipSize;
-        const epoch = Number(tick.epoch ?? 0);
-        if (state.history[state.history.length - 1]?.t === epoch) return;
-        state.history = [
-          ...state.history,
-          { q, d: lastDigit(tick.quote ?? q, pipSize), t: epoch },
-        ].slice(-HISTORY_CAP);
+
+        const prevEpoch = state.history[state.history.length - 1]?.t ?? 0;
+        // Strictly ignore duplicate or out-of-order ticks
+        if (epoch <= prevEpoch) return;
+
+        state.history = [...state.history, { q, d: lastDigit(q, pipSize), t: epoch }].slice(
+          -HISTORY_CAP,
+        );
         state.last = q;
         state.epoch = epoch;
         state.status = "LIVE";
@@ -399,7 +496,9 @@ class DerivFeed {
   private scheduleReconnect() {
     this.setConnection("RECONNECTING");
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = setTimeout(() => this.connect(), 2500);
+    // Exponential backoff with ceiling to prevent runaway reconnect loops
+    const backoffMs = Math.min(15_000, 1500 * Math.pow(1.5, Math.min(6, this.reconnects)));
+    this.reconnectTimer = setTimeout(() => this.connect(), backoffMs);
   }
 
   stop() {

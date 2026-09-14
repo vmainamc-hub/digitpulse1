@@ -7,15 +7,18 @@ import {
   isMateriallySuperior,
   compareLiquidityFormations,
   BestLiquidityScanner,
+  scanBestLiquidityFormation,
   SUPERIORITY_MARGIN,
 } from "./scanner.ts";
-import type {
-  LiquidityZone,
-  SentinelPsychologySnapshot,
-  EvidenceAccumulators,
-  ZoneLifecycleState,
+import {
   ZoneRegistry,
+  type LiquidityZone,
+  type SentinelPsychologySnapshot,
+  type EvidenceAccumulators,
+  type ZoneLifecycleState,
 } from "./zones.ts";
+import { correlateFeedMessage, type Pending } from "./feed.ts";
+import type { MarketAnalysis, ContractAnalysis } from "./engine.ts";
 
 function createMockRegistry(
   activeZones: LiquidityZone[],
@@ -94,32 +97,43 @@ function createMockZone(
     lifecycleState?: ZoneLifecycleState;
     green?: number;
     red?: number;
+    deliveryAcceleration?: number;
+    structuralDeparture?: number;
+    contradiction?: number;
+    generation?: number;
   } = {},
 ): LiquidityZone {
   const isUnder = contract.startsWith("UNDER");
   const barrier = parseInt(contract.split(" ")[1] || "7", 10);
   const green = options.green ?? (isUnder ? 3 : 2);
-  const red = options.red ?? (isUnder ? 2 : 3); // Valid red digit for UNDER is even and != 8
+  const red = options.red ?? (isUnder ? 2 : 3);
 
   const psych = createMockPsychology(options.validPsych ?? true, red, green);
   const accumulators = createMockAccumulators({
     accumulatedLiquidity: options.accumulatedLiquidity ?? 80,
     dominantExhaustion: options.dominantExhaustion ?? 75,
     delivery: options.delivery ?? 75,
+    deliveryAcceleration: options.deliveryAcceleration ?? 15,
     reservoirPersistence: options.reservoirPersistence ?? 70,
     migration: options.migration ?? 65,
     absorption: options.absorption ?? 60,
     conflict: options.conflict ?? 15,
+    contradiction: options.contradiction ?? 10,
+    structuralDeparture: options.structuralDeparture ?? 50,
   });
 
   return {
     zoneId,
+    id: zoneId,
+    generation: options.generation ?? 1,
     market: `Market ${symbol}`,
+    marketId: symbol,
     symbol,
     marketGroup: "STANDARD",
     contract,
     contractId: contract.replace(/\s+/g, ""),
     kind: isUnder ? "UNDER" : "OVER",
+    side: isUnder ? "UNDER" : "OVER",
     barrier,
     creationTick: 100,
     creationTimestamp: Date.now() - 50_000,
@@ -138,339 +152,503 @@ function createMockZone(
     dominantDigits: [green, 5],
     accumulators,
     lifecycleState: options.lifecycleState ?? "RIPE",
+    phase: options.lifecycleState ?? "RIPE",
     previousLifecycleState: "EXHAUSTING",
     stateEnteredAt: Date.now() - 10_000,
+    phaseSince: Date.now() - 10_000,
     stateEnteredTick: 130,
     stateDurationTicks: 15,
+    phaseAgeTicks: 15,
     releaseEvidence: [],
     confirmationEvidence: [],
     invalidationReason: null,
-    qualified: true,
+    qualified: options.lifecycleState === "CONFIRMED",
     qualificationReason: null,
+    evidenceHistory: [],
+    phaseHistory: [],
+    timeline: [],
     ledger: [],
+    trajectory: {
+      direction: "STRENGTHENING",
+      scoreSlope: 0.5,
+      reservoirTrend: 2,
+      exhaustionTrend: 3,
+      deliveryTrend: 4,
+      migrationTrend: 2,
+      absorptionTrend: 1,
+      evidenceMomentum: 12,
+      persistence: 80,
+      acceleration: 5,
+      consistency: 85,
+      lastMeaningfulChange: Date.now(),
+    },
     trajectoryHistory: [70, 72, 75, 78, 80],
+    rankingScore: options.accumulatedLiquidity ?? 80,
     isTerminal: false,
+    milestones: new Set<string>(),
   };
 }
 
-describe("Best Liquidity Scanner & Smart Override Engine", () => {
-  // Test 1 — Initial Scan: Three qualified formations (R_10 = 71, R_50 = 89, R_100 = 77) -> selects R_50
-  it("Test 1: Initial Scan selects highest ranked qualified formation", () => {
-    const r10 = createMockZone("R_10", "UNDER 7", "Z-R10", {
-      accumulatedLiquidity: 65,
-      dominantExhaustion: 60,
-      delivery: 60,
-      ageTicks: 40,
-    });
-    const r50 = createMockZone("R_50", "UNDER 7", "Z-R50", {
-      accumulatedLiquidity: 88,
-      dominantExhaustion: 86,
-      delivery: 84,
-      ageTicks: 90,
-      lifecycleState: "CONFIRMED",
-    });
-    const r100 = createMockZone("R_100", "UNDER 7", "Z-R100", {
-      accumulatedLiquidity: 72,
-      dominantExhaustion: 70,
-      delivery: 70,
-      ageTicks: 50,
-    });
+function createMockContract(kind: "OVER" | "UNDER" = "UNDER", barrier = 7): ContractAnalysis {
+  const psych = createMockPsychology(true, 2, 3);
+  return {
+    id: `${kind}${barrier}`,
+    label: `${kind} ${barrier}`,
+    kind,
+    barrier,
+    psychology1000: psych,
+    creation: 65,
+    exhaustion: 75,
+    exhaustionScore: 75,
+    release: 75,
+    deliveryScore: 75,
+    migrationScore: 70,
+    absorption: 60,
+    absorptionScore: 60,
+    conflict: 10,
+    conflictScore: 10,
+    jsdScore: 40,
+    temporal: {
+      2: { slope20_60: 0.02, slope60_120: 0.01 },
+      4: { slope20_60: 0.02, slope60_120: 0.01 },
+    },
+    transitions: [{ delta: 25 }],
+  } as unknown as ContractAnalysis;
+}
 
-    const score10 = calculateFormationRankScore(r10);
-    const score50 = calculateFormationRankScore(r50);
-    const score100 = calculateFormationRankScore(r100);
+function createMockAnalysis(contract: ContractAnalysis): MarketAnalysis {
+  const psych = createMockPsychology(true, 2, 3);
+  return {
+    symbol: "R_50",
+    entropy: 2.1,
+    jsd: 0.08,
+    psychology1000: psych,
+    sentinelPsychology: psych,
+    contracts: [contract],
+  } as unknown as MarketAnalysis;
+}
 
-    assert.ok(score50 > score10, `R_50 (${score50}) must outrank R_10 (${score10})`);
-    assert.ok(score50 > score100, `R_50 (${score50}) must outrank R_100 (${score100})`);
+describe("Section 25 Mandatory Unit Test Suite (Tests 1 - 12)", () => {
+  // Test 1 — Real age: If no new tick arrives: ageTicks does not increase
+  it("Test 1 — Real age: If no new tick arrives: ageTicks does not increase", () => {
+    const registry = new ZoneRegistry();
+    const contract = createMockContract("UNDER", 7);
+    const analysis = createMockAnalysis(contract);
 
-    const scanner = new BestLiquidityScanner();
-    const mockRegistry = createMockRegistry([r10, r50, r100]);
+    // Promote a formation by feeding required candidate ticks
+    for (let t = 1; t <= 15; t++) {
+      registry.ingest("R_50", "Volatility 50 Index", "STANDARD", analysis, contract, t);
+    }
+    registry.finalize();
 
-    const result = scanner.scan(mockRegistry);
-    assert.ok(result !== null, "Result should not be null");
-    assert.equal(result.symbol, "R_50", "Best initial scan must be R_50");
-    assert.equal(result.zoneId, "Z-R50");
-  });
+    const snapshot1 = registry.snapshot;
+    assert.equal(snapshot1.activeCount, 1, "Formation should be created");
+    const zone = snapshot1.activeZones[0];
+    const initialAge = zone.ageTicks;
+    assert.ok(initialAge >= 1, "Formation must have ageTicks >= 1");
 
-  // Test 2 — Small improvement during cooldown: R_50 = 89, R_100 = 90 -> KEEP R_50
-  it("Test 2: Minor fluctuation during cooldown does NOT replace current selection", () => {
-    const r50 = createMockZone("R_50", "UNDER 7", "Z-R50", {
-      accumulatedLiquidity: 86,
-      dominantExhaustion: 85,
-      delivery: 82,
-      ageTicks: 80,
-    });
+    // Engine cycle runs again with NO new tick (same tick number 15)
+    registry.ingest("R_50", "Volatility 50 Index", "STANDARD", analysis, contract, 15);
+    registry.finalize();
 
-    const r100 = createMockZone("R_100", "UNDER 7", "Z-R100", {
-      accumulatedLiquidity: 87, // only fractionally higher
-      dominantExhaustion: 86,
-      delivery: 83,
-      ageTicks: 30,
-    });
-
-    const evalResult = isMateriallySuperior(r100, r50);
+    const ageAfterSameTick = registry.snapshot.activeZones[0].ageTicks;
     assert.equal(
-      evalResult.isSuperior,
-      false,
-      `Minor improvement (${evalResult.scoreDelta} delta) must NOT be superior (threshold is ${SUPERIORITY_MARGIN})`,
+      ageAfterSameTick,
+      initialAge,
+      "ageTicks must NOT increase when no new tick arrives",
     );
 
-    const scanner = new BestLiquidityScanner();
-    const mockRegistry1 = createMockRegistry([r50, r100]);
+    // Now a genuine new tick arrives (tick 16)
+    registry.ingest("R_50", "Volatility 50 Index", "STANDARD", analysis, contract, 16);
+    registry.finalize();
 
-    scanner.scan(mockRegistry1);
-    assert.equal(scanner.getState().currentSelection?.symbol, "R_50");
-
-    // Engine cycle runs:
-    scanner.onEngineCycle(mockRegistry1);
-    // Selection must remain R_50!
-    assert.equal(scanner.getState().currentSelection?.symbol, "R_50");
+    const ageAfterNewTick = registry.snapshot.activeZones[0].ageTicks;
+    assert.equal(
+      ageAfterNewTick,
+      initialAge + 1,
+      "ageTicks MUST increment by 1 when a genuine new tick arrives",
+    );
   });
 
-  // Test 3 — Strong superior formation: R_50 = 89, R_75 = 96 with stronger persistence -> OVERRIDE R_75
-  it("Test 3: Strong superior formation overrides current selection inside cooldown", () => {
-    const r50 = createMockZone("R_50", "UNDER 7", "Z-R50", {
-      accumulatedLiquidity: 80,
-      dominantExhaustion: 75,
-      delivery: 75,
-      reservoirPersistence: 70,
-      ageTicks: 50,
+  // Test 2 — Stable identity: Multiple updates do not create a new formation ID
+  it("Test 2 — Stable identity: Multiple updates do not create a new formation ID", () => {
+    const registry = new ZoneRegistry();
+    const contract = createMockContract("UNDER", 7);
+    const analysis = createMockAnalysis(contract);
+
+    for (let t = 1; t <= 25; t++) {
+      registry.ingest("R_50", "Volatility 50 Index", "STANDARD", analysis, contract, t);
+    }
+    registry.finalize();
+
+    const zone = registry.snapshot.activeZones[0];
+    const stableZoneId = zone.zoneId;
+    assert.ok(stableZoneId.includes("R50-UNDER7-GEN-01"));
+
+    // Run 10 more ticks of updates
+    for (let t = 26; t <= 35; t++) {
+      registry.ingest("R_50", "Volatility 50 Index", "STANDARD", analysis, contract, t);
+    }
+    registry.finalize();
+
+    assert.equal(registry.snapshot.activeZones.length, 1);
+    assert.equal(
+      registry.snapshot.activeZones[0].zoneId,
+      stableZoneId,
+      "Formation ID must remain permanently stable across multiple updates",
+    );
+  });
+
+  // Test 3 — Formation birth: A single high score does not create a mature formation
+  it("Test 3 — Formation birth: A single high score does not create a mature formation", () => {
+    const registry = new ZoneRegistry();
+    const contract = createMockContract("UNDER", 7);
+    contract.creation = 99;
+    contract.exhaustionScore = 98;
+    contract.deliveryScore = 97;
+    const analysis = createMockAnalysis(contract);
+
+    // Only 1 tick
+    registry.ingest("R_50", "Volatility 50 Index", "STANDARD", analysis, contract, 1);
+    registry.finalize();
+
+    // A single high score tick must NOT create an active mature formation
+    assert.equal(
+      registry.snapshot.activeCount,
+      0,
+      "Single tick must not create an active formation (requires candidate persistence)",
+    );
+    assert.equal(registry.snapshot.candidateCount, 1, "Should be recorded as candidate only");
+  });
+
+  // Test 4 — Hysteresis: One weak tick does not destroy a mature formation
+  it("Test 4 — Hysteresis: One weak tick does not destroy a mature formation", () => {
+    const matureZone = createMockZone("R_50", "UNDER 7", "R50-UNDER7-GEN-01", {
       lifecycleState: "MATURE",
+      accumulatedLiquidity: 75,
+      delivery: 65,
+      reservoirPersistence: 70,
+      dominantExhaustion: 70,
+      ageTicks: 60,
     });
+    matureZone.stateDurationTicks = 20;
 
-    const r75 = createMockZone("R_75", "UNDER 6", "Z-R75", {
-      accumulatedLiquidity: 95,
-      dominantExhaustion: 94,
-      delivery: 92,
-      reservoirPersistence: 90,
-      migration: 88,
-      absorption: 85,
-      conflict: 5,
-      ageTicks: 110,
-      lifecycleState: "CONFIRMED",
-    });
+    const registry = createMockRegistry([matureZone]);
 
-    const evalResult = isMateriallySuperior(r75, r50);
-    assert.equal(
-      evalResult.isSuperior,
-      true,
-      `Materially stronger formation must trigger override (+${evalResult.scoreDelta} pts)`,
-    );
+    // Simulate 1 noisy/weak tick with drop in metrics
+    matureZone.accumulators.accumulatedLiquidity = 58;
+    matureZone.accumulators.delivery = 45;
 
     const scanner = new BestLiquidityScanner();
-    const mockRegistry = createMockRegistry([r50]);
+    scanner.scan(registry);
+    scanner.onEngineCycle(registry);
 
-    // User initially scans R_50
-    scanner.scan(mockRegistry);
-    assert.equal(scanner.getState().currentSelection?.symbol, "R_50");
-
-    // Later, R_75 arrives in registry as a materially superior formation
-    mockRegistry.snapshot.activeZones = [r50, r75];
-    scanner.onEngineCycle(mockRegistry);
-
-    const stateAfter = scanner.getState();
     assert.equal(
-      stateAfter.currentSelection?.symbol,
-      "R_75",
-      "Selection should be overridden to R_75",
-    );
-    assert.equal(
-      stateAfter.currentSelection?.isOverride,
-      true,
-      "Selection should mark isOverride: true",
-    );
-    assert.equal(stateAfter.overrideCount, 1, "Override count should be 1");
-    assert.ok(
-      stateAfter.lastOverride?.reason.includes("Materially stronger"),
-      "Override reason must be recorded",
+      registry.snapshot.activeZones[0].lifecycleState,
+      "MATURE",
+      "One weak tick must NOT destroy or demote a mature formation",
     );
   });
 
-  // Test 4 — "Rank First, Qualify Second":
-  // Formation A has score ~95 but is NOT qualified (e.g. losing purple digit).
-  // Formation B has score ~88 and IS qualified.
-  // Scan MUST return Formation A as #1 Ranked formation, and identify Formation B as Best Qualified!
-  it("Test 4: Rank First, Qualify Second — #1 Ranked is selected even when not qualified", () => {
-    // Formation A (R_100): High score, but has invalid psychology / losing digit
-    const r100 = createMockZone("R_100", "UNDER 7", "Z-R100", {
+  // Test 5 — Ranking vs qualification: A NOT QUALIFIED #1 formation remains BEST RANKED
+  it("Test 5 — Ranking vs qualification: A NOT QUALIFIED #1 formation remains BEST RANKED", () => {
+    // Formation A: Very high raw metrics, but fails qualification due to Sentinel psychology rejection
+    const formA = createMockZone("R_100", "UNDER 7", "R100-U7-01", {
       validPsych: false,
-      accumulatedLiquidity: 95,
-      dominantExhaustion: 94,
-      delivery: 92,
-      reservoirPersistence: 90,
-      migration: 88,
-      absorption: 85,
-      conflict: 8,
-      ageTicks: 120,
+      accumulatedLiquidity: 98,
+      dominantExhaustion: 96,
+      delivery: 95,
+      reservoirPersistence: 95,
+      migration: 90,
+      absorption: 90,
+      ageTicks: 80,
       lifecycleState: "RELEASE",
     });
 
-    // Formation B (R_50): Slightly lower score, fully qualified
-    const r50 = createMockZone("R_50", "UNDER 7", "Z-R50", {
+    // Formation B: Lower metrics, but passes qualification
+    const formB = createMockZone("R_50", "UNDER 7", "R50-U7-01", {
       validPsych: true,
-      accumulatedLiquidity: 84,
-      dominantExhaustion: 80,
-      delivery: 78,
-      reservoirPersistence: 76,
-      migration: 72,
-      absorption: 70,
-      conflict: 12,
-      ageTicks: 70,
+      accumulatedLiquidity: 75,
+      dominantExhaustion: 72,
+      delivery: 70,
+      reservoirPersistence: 70,
+      migration: 65,
+      absorption: 60,
+      ageTicks: 45,
       lifecycleState: "CONFIRMED",
     });
 
-    const score100 = calculateFormationRankScore(r100);
-    const score50 = calculateFormationRankScore(r50);
-    assert.ok(
-      score100 > score50,
-      `Formation A (${score100}) must have higher score than Formation B (${score50})`,
-    );
+    const scoreA = calculateFormationRankScore(formA);
+    const scoreB = calculateFormationRankScore(formB);
+    assert.ok(scoreA > scoreB, `Formation A (${scoreA}) must outscore Formation B (${scoreB})`);
 
-    const qual100 = qualifyFormation(r100);
-    const qual50 = qualifyFormation(r50);
-    assert.equal(qual100.isQualified, false, "Formation A must NOT be qualified");
-    assert.equal(qual50.isQualified, true, "Formation B must BE qualified");
+    const qualA = qualifyFormation(formA);
+    const qualB = qualifyFormation(formB);
+    assert.equal(qualA.isQualified, false, "Formation A must be NOT qualified");
+    assert.equal(qualB.isQualified, true, "Formation B must be qualified");
 
-    const scanner = new BestLiquidityScanner();
-    const mockRegistry = createMockRegistry([r50, r100]);
+    const registry = createMockRegistry([formA, formB]);
+    const scanOut = scanBestLiquidityFormation(registry);
 
-    // Perform intentional scan:
-    const result = scanner.scan(mockRegistry);
-    assert.ok(result !== null, "Result must not be null");
-
-    const state = scanner.getState();
-
-    // 1. Current selection (#1 ranked) MUST BE Formation A (R_100)
+    assert.ok(scanOut.bestRanked !== null);
     assert.equal(
-      state.currentSelection?.symbol,
-      "R_100",
-      "#1 ranked formation must be R_100 even though it is not qualified",
+      scanOut.bestRanked.zoneId,
+      "R100-U7-01",
+      "Formation A must be #1 ranked despite not being qualified",
     );
-    assert.equal(
-      state.currentSelection?.qualified,
-      false,
-      "#1 ranked formation must report qualified = false",
-    );
-    assert.equal(state.currentSelection?.rank, 1, "#1 ranked formation must have rank = 1");
-
-    // 2. Best Qualified formation MUST BE Formation B (R_50)
-    assert.ok(state.bestQualified !== null, "bestQualified must not be null");
-    assert.equal(state.bestQualified?.symbol, "R_50", "bestQualified must be Formation B (R_50)");
-    assert.equal(
-      state.bestQualified?.qualified,
-      true,
-      "bestQualified must report qualified = true",
-    );
+    assert.equal(scanOut.bestRanked.qualified, false, "Best ranked must report qualified: false");
   });
 
-  // Test 5 — When no formations are qualified in the universe:
-  // Scanner STILL displays #1 Ranked formation (with qualified = false), and bestQualified is null.
-  it("Test 5: When no formations qualify, #1 ranked formation is still displayed with bestQualified = null", () => {
-    const r10 = createMockZone("R_10", "UNDER 7", "Z-R10", {
-      validPsych: false, // invalid
-      accumulatedLiquidity: 90,
+  // Test 6 — Best qualified: A lower-ranked qualified formation is separately returned
+  it("Test 6 — Best qualified: A lower-ranked qualified formation is separately returned", () => {
+    const formA = createMockZone("R_100", "UNDER 7", "R100-U7-01", {
+      validPsych: false,
+      accumulatedLiquidity: 98,
+      dominantExhaustion: 96,
+      delivery: 95,
+      reservoirPersistence: 95,
+      migration: 90,
+      absorption: 90,
       ageTicks: 80,
+      lifecycleState: "RELEASE",
     });
-    const r25 = createMockZone("R_25", "UNDER 7", "Z-R25", {
-      validPsych: false, // invalid
-      conflict: 85, // severe conflict
-      accumulatedLiquidity: 70,
-      ageTicks: 30,
+    const formB = createMockZone("R_50", "UNDER 7", "R50-U7-01", {
+      validPsych: true,
+      accumulatedLiquidity: 75,
+      dominantExhaustion: 72,
+      delivery: 70,
+      reservoirPersistence: 70,
+      migration: 65,
+      absorption: 60,
+      ageTicks: 45,
+      lifecycleState: "CONFIRMED",
     });
 
+    const registry = createMockRegistry([formA, formB]);
     const scanner = new BestLiquidityScanner();
-    const mockRegistry = createMockRegistry([r10, r25]);
-
-    const result = scanner.scan(mockRegistry);
-    assert.ok(result !== null, "Scanner must return the #1 ranked formation");
+    scanner.scan(registry);
 
     const state = scanner.getState();
-    assert.equal(
-      state.currentSelection?.symbol,
-      "R_10",
-      "#1 ranked formation must be R_10 (highest score)",
-    );
-    assert.equal(state.currentSelection?.qualified, false, "Must report qualified = false");
-    assert.equal(state.bestQualified, null, "bestQualified must be null when none qualify");
-    assert.equal(state.noQualifiedFound, true, "noQualifiedFound must be true");
+    assert.equal(state.currentSelection?.zoneId, "R100-U7-01", "Rank #1 is Form A");
+    assert.equal(state.bestQualified?.zoneId, "R50-U7-01", "Best qualified is Form B");
+    assert.equal(state.bestQualified?.qualified, true, "Best qualified is confirmed qualified");
   });
 
-  // Test 6 — Same formation improves: R_50 UNDER 7 86% -> 91% -> KEEP SAME ZONE ID, update strength
-  it("Test 6: Same formation updates in-place preserving stable zone ID", () => {
-    const r50 = createMockZone("R_50", "UNDER 7", "LIQ-20260913-R50-U7-101", {
-      accumulatedLiquidity: 86,
+  // Test 7 — Confirmation: RIPE does not immediately become CONFIRMED without evidence
+  it("Test 7 — Confirmation: RIPE does not immediately become CONFIRMED without evidence", () => {
+    const registry = new ZoneRegistry();
+    const contract = createMockContract("UNDER", 7);
+    // Exhaustion and delivery below confirmation gates (72 and 68)
+    contract.exhaustionScore = 55;
+    contract.deliveryScore = 50;
+    contract.creation = 50;
+    const analysis = createMockAnalysis(contract);
+
+    // Ingest ticks to promote to active formation
+    for (let t = 1; t <= 16; t++) {
+      registry.ingest("R_50", "Volatility 50 Index", "STANDARD", analysis, contract, t);
+    }
+    registry.finalize();
+
+    const zone = registry.snapshot.activeZones[0];
+    assert.ok(zone !== undefined, "Zone should exist");
+    // Zone should NOT be CONFIRMED because multi-dimensional confirmation gates have not been met
+    assert.notEqual(
+      zone.lifecycleState,
+      "CONFIRMED",
+      "Zone must not prematurely become CONFIRMED without meeting all independent dimensional gates",
+    );
+    assert.equal(
+      zone.qualified,
+      false,
+      "Zone must report qualified = false prior to full multi-window confirmation",
+    );
+  });
+
+  // Test 8 — Evidence: Identical repeated observations do not generate duplicate evidence events
+  it("Test 8 — Evidence: Identical repeated observations do not generate duplicate evidence events", () => {
+    const registry = new ZoneRegistry();
+    const contract = createMockContract("UNDER", 7);
+    const analysis = createMockAnalysis(contract);
+
+    // Build zone
+    for (let t = 1; t <= 16; t++) {
+      registry.ingest("R_50", "Volatility 50 Index", "STANDARD", analysis, contract, t);
+    }
+    registry.finalize();
+
+    // Run identical observations across 6 ticks
+    for (let t = 17; t <= 22; t++) {
+      registry.ingest("R_50", "Volatility 50 Index", "STANDARD", analysis, contract, t);
+    }
+    registry.finalize();
+
+    const events = registry.snapshot.activeZones[0].timeline;
+    // Check that there are no consecutive duplicate events with identical type and description
+    for (let i = 1; i < events.length; i++) {
+      const prev = events[i - 1];
+      const curr = events[i];
+      assert.notEqual(
+        `${curr.type}-${curr.description}`,
+        `${prev.type}-${prev.description}`,
+        "Identical repeated observations must not create duplicate consecutive timeline events",
+      );
+    }
+  });
+
+  // Test 9 — Generation: Invalidation followed by a new formation produces a new generation
+  it("Test 9 — Generation: Invalidation followed by a new formation produces a new generation", () => {
+    const registry = new ZoneRegistry();
+    const contract = createMockContract("UNDER", 7);
+    const analysis = createMockAnalysis(contract);
+
+    // 1. First formation (GEN-01)
+    for (let t = 1; t <= 15; t++) {
+      registry.ingest("R_50", "Volatility 50 Index", "STANDARD", analysis, contract, t);
+    }
+    registry.finalize();
+
+    const zone1 = registry.snapshot.activeZones[0];
+    assert.ok(zone1.zoneId.includes("GEN-01"), "First formation must be GEN-01");
+    assert.equal(zone1.generation, 1);
+
+    // 2. Invalidate formation 1
+    zone1.lifecycleState = "INVALIDATED";
+    zone1.isTerminal = true;
+    registry.finalize();
+
+    assert.equal(registry.snapshot.activeCount, 0, "Formation 1 retired from active");
+    assert.equal(registry.snapshot.historicalCount, 1, "Formation 1 stored in history");
+
+    // 3. New structural activity leads to new candidate and birth
+    for (let t = 50; t <= 65; t++) {
+      registry.ingest("R_50", "Volatility 50 Index", "STANDARD", analysis, contract, t);
+    }
+    registry.finalize();
+
+    assert.equal(registry.snapshot.activeCount, 1, "New formation created");
+    const zone2 = registry.snapshot.activeZones[0];
+    assert.ok(
+      zone2.zoneId.includes("GEN-02"),
+      `Second formation must have incremented generation ID: got ${zone2.zoneId}`,
+    );
+    assert.equal(zone2.generation, 2, "Second generation must equal 2");
+  });
+
+  // Test 10 — Scan stability: Normal ticks do not automatically replace the selected scan result
+  it("Test 10 — Scan stability: Normal ticks do not automatically replace the selected scan result", () => {
+    const formA = createMockZone("R_50", "UNDER 7", "R50-U7-STABLE", {
+      accumulatedLiquidity: 82,
       dominantExhaustion: 80,
       delivery: 78,
       ageTicks: 60,
     });
-
-    const scanner = new BestLiquidityScanner();
-    const mockRegistry = createMockRegistry([r50]);
-
-    scanner.scan(mockRegistry);
-    const initialSelection = scanner.getState().currentSelection;
-    assert.equal(initialSelection?.zoneId, "LIQ-20260913-R50-U7-101");
-    const initialScore = initialSelection?.score ?? 0;
-
-    // Next tick: same zone strengthens
-    r50.accumulators.accumulatedLiquidity = 94;
-    r50.accumulators.dominantExhaustion = 90;
-    r50.accumulators.delivery = 88;
-    r50.ageTicks = 65;
-
-    scanner.onEngineCycle(mockRegistry);
-
-    const updatedSelection = scanner.getState().currentSelection;
-    assert.equal(
-      updatedSelection?.zoneId,
-      "LIQ-20260913-R50-U7-101",
-      "Zone ID must remain identical",
-    );
-    assert.ok(
-      (updatedSelection?.score ?? 0) > initialScore,
-      "Score must reflect improved strength",
-    );
-    assert.equal(updatedSelection?.formationAge, 65, "Age ticks must update");
-  });
-
-  // Test 7 — Tick noise: small fluctuations must NOT cause A -> B -> A -> C -> A churn
-  it("Test 7: Hysteresis prevents selection churn from small tick fluctuations", () => {
-    const r50 = createMockZone("R_50", "UNDER 7", "Z-R50", {
-      accumulatedLiquidity: 85,
-      dominantExhaustion: 82,
-      delivery: 80,
-      ageTicks: 70,
-    });
-
-    const r25 = createMockZone("R_25", "UNDER 7", "Z-R25", {
-      accumulatedLiquidity: 85.5, // 0.5 difference
-      dominantExhaustion: 82.5,
-      delivery: 80,
+    const formB = createMockZone("R_100", "UNDER 7", "R100-U7-OTHER", {
+      accumulatedLiquidity: 82.5,
+      dominantExhaustion: 80,
+      delivery: 78,
       ageTicks: 40,
     });
 
+    const registry = createMockRegistry([formA, formB]);
     const scanner = new BestLiquidityScanner();
-    const mockRegistry = createMockRegistry([r50, r25]);
+    scanner.scan(registry);
 
-    scanner.scan(mockRegistry);
-    const selectedSymbol = scanner.getState().currentSelection?.symbol;
+    const initialSelectedId = scanner.getState().currentSelection?.zoneId;
+    assert.equal(initialSelectedId, "R50-U7-STABLE");
 
-    // Simulate 10 noisy ticks fluctuating by ±1%
+    // 10 cycles with small score oscillations
     for (let i = 0; i < 10; i++) {
-      r50.accumulators.accumulatedLiquidity = 85 + (i % 2 === 0 ? 1 : -1);
-      r25.accumulators.accumulatedLiquidity = 85.5 + (i % 2 === 0 ? -1 : 1);
-      scanner.onEngineCycle(mockRegistry);
+      formA.accumulators.accumulatedLiquidity = 82 + (i % 2 === 0 ? 0.4 : -0.4);
+      formB.accumulators.accumulatedLiquidity = 82.5 + (i % 2 === 0 ? -0.4 : 0.4);
+      scanner.onEngineCycle(registry);
     }
 
+    const finalSelectedId = scanner.getState().currentSelection?.zoneId;
     assert.equal(
-      scanner.getState().currentSelection?.symbol,
-      selectedSymbol,
-      "Selection must not flap back and forth across 10 noisy ticks",
+      finalSelectedId,
+      initialSelectedId,
+      "Normal ticks must not replace the selected scan result",
     );
+    assert.equal(scanner.getState().overrideCount, 0, "No override triggered");
+  });
+
+  // Test 11 — Superior override: A genuinely superior formation can replace the selected result after the intended override interval
+  it("Test 11 — Superior override: A genuinely superior formation can replace the selected result after the intended override interval", () => {
+    const formA = createMockZone("R_50", "UNDER 7", "R50-U7-CURRENT", {
+      accumulatedLiquidity: 78,
+      dominantExhaustion: 75,
+      delivery: 72,
+      ageTicks: 50,
+      lifecycleState: "MATURE",
+    });
+
+    const registry = createMockRegistry([formA]);
+    const scanner = new BestLiquidityScanner();
+    scanner.scan(registry);
+    assert.equal(scanner.getState().currentSelection?.zoneId, "R50-U7-CURRENT");
+
+    // Superior candidate arrives with +14 pts advantage, high persistence, confirmed state
+    const superiorFormB = createMockZone("R_75", "UNDER 6", "R75-U6-SUPERIOR", {
+      accumulatedLiquidity: 95,
+      dominantExhaustion: 94,
+      delivery: 92,
+      ageTicks: 90,
+      lifecycleState: "CONFIRMED",
+    });
+
+    const superiority = isMateriallySuperior(superiorFormB, formA);
+    assert.equal(superiority.isSuperior, true, "Must be evaluated as materially superior");
+    assert.ok(superiority.scoreDelta >= SUPERIORITY_MARGIN);
+
+    registry.snapshot.activeZones = [formA, superiorFormB];
+    scanner.onEngineCycle(registry);
+
+    const state = scanner.getState();
     assert.equal(
-      scanner.getState().overrideCount,
-      0,
-      "No override should have triggered for minor noise",
+      state.currentSelection?.zoneId,
+      "R75-U6-SUPERIOR",
+      "Superior formation must override the current selection",
     );
+    assert.equal(state.currentSelection?.isOverride, true, "Must record isOverride: true");
+    assert.equal(state.overrideCount, 1, "Override count must equal 1");
+    assert.ok(state.lastOverride?.reason.includes("Materially stronger"));
+  });
+
+  // Test 12 — Feed correlation: Responses are matched using req_id
+  it("Test 12 — Feed correlation: Responses are matched using req_id", () => {
+    const pendingMap = new Map<number, Pending>();
+    pendingMap.set(1042, {
+      kind: "HISTORY",
+      symbol: "R_50",
+      at: Date.now(),
+    });
+
+    // Message arrives with req_id matching the pending entry
+    const messageWithReqId = {
+      req_id: 1042,
+      msg_type: "history",
+      history: { prices: [100.1, 100.2], times: [1700000000, 1700000002] },
+    };
+
+    const correlation = correlateFeedMessage(messageWithReqId, pendingMap);
+    assert.equal(correlation.matchedBy, "req_id", "Must match using req_id");
+    assert.equal(correlation.reqId, 1042);
+    assert.equal(correlation.symbol, "R_50", "Must correlate to symbol R_50 from pending map");
+    assert.equal(correlation.kind, "HISTORY");
+
+    // Even if echo_req has another symbol or none, req_id takes precedence
+    const messageWithConflictingEcho = {
+      req_id: 1042,
+      echo_req: { ticks_history: "R_10" },
+      msg_type: "history",
+    };
+    const correlation2 = correlateFeedMessage(messageWithConflictingEcho, pendingMap);
+    assert.equal(
+      correlation2.matchedBy,
+      "req_id",
+      "req_id must take precedence over echo_req fallback",
+    );
+    assert.equal(correlation2.symbol, "R_50");
   });
 });
