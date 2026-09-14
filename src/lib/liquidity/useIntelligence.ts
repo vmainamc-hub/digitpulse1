@@ -1,5 +1,4 @@
 import { useMemo, useSyncExternalStore } from "react";
-
 import { getFeed, type MarketState } from "./feed";
 import { analyzeMarket, type ContractAnalysis, type MarketAnalysis } from "./engine";
 import { analyzeAuthoritativeMarket, type AuthoritativeContract, type AuthoritativeMarket } from "./authoritative-v4";
@@ -7,34 +6,10 @@ import { journal } from "./journal";
 import type { LiquidityState } from "./universe";
 
 export interface ComputedMarket extends MarketState { analysis: MarketAnalysis | null; authoritative: AuthoritativeMarket | null; }
-
-export function useFeed() { const feed=getFeed(); return useSyncExternalStore(feed.subscribe,feed.getSnapshot,feed.getServerSnapshot); }
-export function useJournal() { return useSyncExternalStore(journal.subscribe,journal.getSnapshot,journal.getServerSnapshot); }
-
+export function useFeed(){const feed=getFeed();return useSyncExternalStore(feed.subscribe,feed.getSnapshot,feed.getServerSnapshot);}
+export function useJournal(){return useSyncExternalStore(journal.subscribe,journal.getSnapshot,journal.getServerSnapshot);}
 const authoritativeCache=new Map<string,AuthoritativeMarket>();
 const stateMap=(s:AuthoritativeContract['state']):LiquidityState=>({NO_LIQUIDITY:'ABSENT',FORMING:'FORMING',BUILDING:'BUILDING',MATURE:'MATURE',EXHAUSTION_WATCH:'EXHAUSTING',EXHAUSTION_CONFIRMED:'EXHAUSTING',DELIVERY:'RIPE',DELIVERY_ACCELERATING:'RIPE',ABSORBING:'ABSORBING',RELEASE_WATCH:'RELEASED',RELEASE:'RELEASED',RIPE:'RIPE',CONFIRMED:'CONFIRMED',CONFLICTED:'CONFLICTED',BLOCKED:'BLOCKED'}[s]);
-
-function applyAuthoritative(base:MarketAnalysis, auth:AuthoritativeMarket):MarketAnalysis {
- const contracts:ContractAnalysis[]=auth.contracts.map((c)=>{
-  const baseContract=base.contracts.find(x=>x.id===c.id) ?? base.top;
-  const dimensions=[
-   {key:'reservoir',label:'Accumulated reservoir',value:c.accumulatedLiquidity,weight:.20,supports:c.accumulatedLiquidity>=45},
-   {key:'maturity',label:'Maturation',value:c.maturity,weight:.15,supports:c.maturity>=55},
-   {key:'exhaustion',label:'Dominant exhaustion',value:c.exhaustion,weight:.18,supports:c.exhaustion>=65},
-   {key:'delivery',label:'Reservoir delivery',value:c.delivery,weight:.20,supports:c.delivery>=62},
-   {key:'safety',label:'Danger clearance',value:100-c.conflict,weight:.12,supports:c.conflict<55},
-   {key:'release',label:'Structural release',value:c.release,weight:.10,supports:c.release>=60},
-   {key:'coherence',label:'Reservoir coherence',value:100-c.conflict,weight:.05,supports:c.conflict<55},
-  ];
-  return {...baseContract,creation:c.accumulatedLiquidity,maturity:c.maturity,absorption:c.absorption,exhaustion:c.exhaustion,release:c.release,danger:c.conflict,conflict:c.conflict,confirmation:c.confirmation,pressure:c.reservoirs.length?c.reservoirs.reduce((s,r)=>s+r.pressure,0)/c.reservoirs.length:50,boundaryAttack:c.reservoirScore,drift:c.trajectory==='STRENGTHENING'?c.delivery-c.accumulatedLiquidity:c.trajectory==='WEAKENING'?c.accumulatedLiquidity-c.delivery:0,dimensions,supportCount:dimensions.filter(d=>d.supports).length,state:stateMap(c.state),law:c.accumulatedLiquidity>=35,ripe:['RIPE','RELEASED','CONFIRMED'].includes(stateMap(c.state)),confirmed:c.state==='CONFIRMED'};
- });
- const top=contracts.find(c=>c.id===auth.top.id)??contracts[0];
- return {...base,contracts,top,bayesian:{...base.bayesian,[top.id]:top.confirmation}};
-}
-
-/** The same canonical feed now drives the authoritative reservoir/lifecycle model. */
-export function useIntelligence(){
- const snapshot=useFeed();
- const markets=useMemo<ComputedMarket[]>(()=>snapshot.markets.map(m=>{const previous=authoritativeCache.get(m.symbol);const authoritative=analyzeAuthoritativeMarket(m.symbol,m.history,previous);authoritativeCache.set(m.symbol,authoritative);const legacy=analyzeMarket(m.history);return {...m,analysis:applyAuthoritative(legacy,authoritative),authoritative};}),[snapshot.version]);
- return {snapshot,markets};
-}
+function applyAuthoritative(base:MarketAnalysis,auth:AuthoritativeMarket):MarketAnalysis{const contracts:ContractAnalysis[]=auth.contracts.map(c=>{const baseContract=base.contracts.find(x=>x.id===c.id)??base.top;const dimensions=[{key:'reservoir',label:'Accumulated reservoir',value:c.accumulatedLiquidity,weight:.20,supports:c.accumulatedLiquidity>=45},{key:'maturity',label:'Maturation',value:c.maturity,weight:.15,supports:c.maturity>=55},{key:'exhaustion',label:'Dominant exhaustion',value:c.exhaustion,weight:.18,supports:c.exhaustion>=65},{key:'delivery',label:'Reservoir delivery',value:c.delivery,weight:.20,supports:c.delivery>=62},{key:'safety',label:'Danger clearance',value:100-c.conflict,weight:.12,supports:c.conflict<55},{key:'release',label:'Structural release',value:c.release,weight:.10,supports:c.release>=60},{key:'coherence',label:'Reservoir coherence',value:100-c.conflict,weight:.05,supports:c.conflict<55}];return {...baseContract,creation:c.accumulatedLiquidity,maturity:c.maturity,absorption:c.absorption,exhaustion:c.exhaustion,release:c.release,danger:c.conflict,conflict:c.conflict,confirmation:c.confirmation,pressure:c.reservoirs.length?c.reservoirs.reduce((s,r)=>s+r.pressure,0)/c.reservoirs.length:50,boundaryAttack:c.reservoirScore,drift:c.trajectory==='STRENGTHENING'?c.delivery-c.accumulatedLiquidity:c.trajectory==='WEAKENING'?c.accumulatedLiquidity-c.delivery:0,dimensions,supportCount:dimensions.filter(d=>d.supports).length,state:stateMap(c.state),law:c.accumulatedLiquidity>=35,ripe:['RIPE','RELEASED','CONFIRMED'].includes(stateMap(c.state)),confirmed:c.state==='CONFIRMED'};});const top=contracts.find(c=>c.id===auth.top.id)??contracts[0];return {...base,contracts,top,bayesian:{...base.bayesian,[top.id]:top.confirmation}};}
+/** The canonical feed drives both research and the authoritative reservoir/lifecycle model. */
+export function useIntelligence(){const snapshot=useFeed();const markets=useMemo<ComputedMarket[]>(()=>snapshot.markets.map(m=>{const previous=authoritativeCache.get(m.symbol);const authoritative=analyzeAuthoritativeMarket(m.symbol,m.history,previous,m.ticks);authoritativeCache.set(m.symbol,authoritative);const legacy=analyzeMarket(m.history);return {...m,analysis:applyAuthoritative(legacy,authoritative),authoritative};}),[snapshot.version]);return {snapshot,markets};}
