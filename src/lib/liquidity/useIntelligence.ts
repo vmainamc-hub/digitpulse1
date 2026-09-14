@@ -14,11 +14,10 @@ export type {
   AuthoritativeMarketAnalysis,
 };
 export {
-  analyzeAuthoritativeMarket,
-  analyzeAuthoritativeContract,
-  detectReservoirs,
-  calculateStructuralLiquidityLevel,
-} from "./authoritative-v4";
+  analyzeAuthoritativeProductionMarket,
+  AUTHORITATIVE_PRODUCTION_GATES,
+  LIFECYCLE_ORDER,
+} from "./authoritative-production";
 
 export function useIntelligenceSnapshot(): IntelligenceSnapshot {
   const intel = getIntelligence();
@@ -38,25 +37,13 @@ export function useIntelligence() {
 }
 
 function canonicalVetoes(contract: AuthoritativeContract): string[] {
-  return contract.vetoes.filter(
-    (v) =>
-      !v.startsWith("Insufficient formation age") &&
-      !v.startsWith("Insufficient accumulated liquidity") &&
-      !v.startsWith("Elevated structural conflict"),
-  );
+  return contract.vetoes;
 }
 
 function toScanResult(market: ComputedMarket, contract: AuthoritativeContract, rank: number): ScanResult {
   const now = Date.now();
   const vetoes = canonicalVetoes(contract);
-  const strictQualified =
-    contract.age >= 12 &&
-    contract.accumulatedLiquidity >= 65 &&
-    contract.maturity >= 62 &&
-    contract.exhaustion >= 65 &&
-    contract.delivery >= 62 &&
-    contract.conflict < 60 &&
-    vetoes.length === 0;
+  const strictQualified = contract.qualified;
   const psychologyAdherence = vetoes.length === 0 ? 100 : Math.max(0, 100 - vetoes.length * 20);
   const trajectory = contract.trajectory as ScanResult["trajectory"];
 
@@ -75,7 +62,7 @@ function toScanResult(market: ComputedMarket, contract: AuthoritativeContract, r
     qualified: strictQualified,
     qualificationStatus: strictQualified ? "QUALIFIED" : contract.qualificationStatus,
     qualificationReasons: strictQualified ? [] : vetoes,
-    qualificationReason: strictQualified ? "All canonical V4 gates satisfied" : (vetoes[0] ?? "Canonical V4 gates not satisfied"),
+    qualificationReason: strictQualified ? "All authoritative production gates satisfied" : (vetoes[0] ?? "Authoritative production gates not satisfied"),
     scannedAt: now,
     formattedTime: new Date(now).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
     rankHoldTimeSeconds: 0,
@@ -115,7 +102,7 @@ function toScanResult(market: ComputedMarket, contract: AuthoritativeContract, r
   } as ScanResult;
 }
 
-/** Production selection facade: ranking is derived directly from authoritative V4 projections. */
+/** Production selection facade: ranking is derived directly from authoritative production contracts. */
 export function useBestLiquidityScanner() {
   const snap = useIntelligenceSnapshot();
   const [totalScansPerformed, setTotalScansPerformed] = useState(0);
