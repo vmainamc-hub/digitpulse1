@@ -11,6 +11,7 @@ import { StateTag } from "@/components/li/primitives";
 import { LedgerView, RadarView } from "@/components/li/radar";
 import { BestLiquidityPanel } from "@/components/li/BestLiquidityPanel";
 import { SignalBriefing } from "@/components/li/SignalBriefing";
+import { AuthoritativeLiquidityView } from "@/components/li/AuthoritativeLiquidityView";
 import {
   DangerView,
   LiquidityView,
@@ -287,8 +288,10 @@ function Console() {
               ) : (
                 <>
                   {tab === "LIQUIDITY" && (
-                    <LiquidityView
-                      a={analysis}
+                    <AuthoritativeLiquidityView
+                      contracts={
+                        current?.authoritative?.contracts ?? analysis.authoritativeContracts ?? []
+                      }
                       selectedContract={contractFocus}
                       onSelectContract={setContractFocus}
                     />

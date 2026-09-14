@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "test": "tsx src/lib/liquidity/scanner.test.ts"
+    "test": "tsx src/lib/liquidity/scanner.test.ts && tsx src/lib/liquidity/authoritative-v4.test.ts"
   },
   "overrides": {
     "rolldown": "1.2.1"

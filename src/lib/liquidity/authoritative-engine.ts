@@ -37,3 +37,4 @@ export * from "./scanner";
 export * from "./intelligence";
 export * from "./useIntelligence";
 export * from "./journal";
+export * from "./authoritative-v4";

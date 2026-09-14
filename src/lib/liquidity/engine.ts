@@ -19,6 +19,7 @@ import {
   type ContractKind,
   type LiquidityState,
 } from "./universe";
+import type { AuthoritativeContract } from "./authoritative-v4";
 import {
   autocorr,
   bayes,
@@ -212,6 +213,7 @@ export interface MarketAnalysis {
   contracts: ContractAnalysis[];
   top: ContractAnalysis;
   bayesian: Record<string, number>;
+  authoritativeContracts?: AuthoritativeContract[];
 }
 
 interface Features {

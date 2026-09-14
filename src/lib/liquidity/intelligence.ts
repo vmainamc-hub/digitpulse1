@@ -17,9 +17,11 @@ import {
 } from "./opportunity";
 import { getZoneRegistry, ZoneRegistry, type ZoneRegistrySnapshot } from "./zones";
 import { getLiquidityScanner } from "./scanner";
+import { analyzeAuthoritativeMarket, type AuthoritativeMarketAnalysis } from "./authoritative-v4";
 
 export interface ComputedMarket extends MarketState {
   analysis: MarketAnalysis | null;
+  authoritative: AuthoritativeMarketAnalysis | null;
 }
 
 export interface IntelligenceSnapshot {
@@ -38,7 +40,14 @@ class Intelligence {
   private store = new OpportunityStore();
   private zoneRegistry = getZoneRegistry();
   private listeners = new Set<() => void>();
-  private cache = new Map<string, { stamp: string; analysis: MarketAnalysis | null }>();
+  private cache = new Map<
+    string,
+    {
+      stamp: string;
+      analysis: MarketAnalysis | null;
+      authoritative: AuthoritativeMarketAnalysis | null;
+    }
+  >();
   private timer: ReturnType<typeof setInterval> | null = null;
   private started = false;
   private version = 0;
@@ -113,10 +122,23 @@ class Intelligence {
       // Shared feature computation is skipped entirely when the market has not
       // advanced since the previous cycle.
       const prevV3 = cached?.analysis?.v3Opportunities ?? {};
+      const prevAuth = cached?.authoritative?.contracts
+        ? Object.fromEntries(cached.authoritative.contracts.map((c) => [c.id, c]))
+        : {};
       const analysis =
         cached?.stamp === stamp ? cached.analysis : analyzeMarket(m.history, m.symbol, prevV3);
-      if (cached?.stamp !== stamp) this.cache.set(m.symbol, { stamp, analysis });
-      markets.push({ ...m, analysis });
+      const authoritative =
+        cached?.stamp === stamp
+          ? cached.authoritative
+          : analyzeAuthoritativeMarket(m.history, m.symbol, prevAuth);
+
+      if (cached?.stamp !== stamp) this.cache.set(m.symbol, { stamp, analysis, authoritative });
+
+      if (analysis && authoritative) {
+        analysis.authoritativeContracts = authoritative.contracts;
+      }
+
+      markets.push({ ...m, analysis, authoritative });
 
       if (analysis) {
         this.store.ingest(m.symbol, m.name, m.group, analysis, latest?.t ?? 0);

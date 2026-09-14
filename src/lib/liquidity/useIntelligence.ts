@@ -3,8 +3,22 @@ import { useSyncExternalStore } from "react";
 import { getIntelligence, type ComputedMarket, type IntelligenceSnapshot } from "./intelligence";
 import { journal } from "./journal";
 import { getLiquidityScanner, type ScanResult, type ScannerState } from "./scanner";
+import type { AuthoritativeContract, AuthoritativeMarketAnalysis } from "./authoritative-v4";
 
-export type { ComputedMarket, IntelligenceSnapshot, ScanResult, ScannerState };
+export type {
+  ComputedMarket,
+  IntelligenceSnapshot,
+  ScanResult,
+  ScannerState,
+  AuthoritativeContract,
+  AuthoritativeMarketAnalysis,
+};
+export {
+  analyzeAuthoritativeMarket,
+  analyzeAuthoritativeContract,
+  detectReservoirs,
+  calculateStructuralLiquidityLevel,
+} from "./authoritative-v4";
 
 /** Read-only subscription to the continuously running intelligence engine. */
 export function useIntelligenceSnapshot(): IntelligenceSnapshot {

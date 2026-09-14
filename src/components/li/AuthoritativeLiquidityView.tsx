@@ -1,20 +1,200 @@
-import { cn } from '@/lib/utils';
-import type { AuthoritativeContract } from '@/lib/liquidity/authoritative-v4';
-import { Meter, Note, Panel, StateTag } from './primitives';
+import { cn } from "@/lib/utils";
+import type { AuthoritativeContract } from "@/lib/liquidity/authoritative-v4";
+import { Meter, Note, Panel, StateTag } from "./primitives";
 
-const lifecycle = ['NO_LIQUIDITY','FORMING','BUILDING','MATURE','EXHAUSTION_WATCH','EXHAUSTION_CONFIRMED','DELIVERY','DELIVERY_ACCELERATING','ABSORBING','RELEASE_WATCH','RELEASE','CONFIRMED'] as const;
+const lifecycle = [
+  "NO_LIQUIDITY",
+  "FORMING",
+  "BUILDING",
+  "MATURE",
+  "EXHAUSTION_WATCH",
+  "EXHAUSTION_CONFIRMED",
+  "DELIVERY",
+  "DELIVERY_ACCELERATING",
+  "ABSORBING",
+  "RELEASE_WATCH",
+  "RELEASE",
+  "CONFIRMED",
+] as const;
 
-function ReservoirRow({ r }: { r: AuthoritativeContract['reservoirs'][number] }) {
-  return <div className="rounded border border-border bg-surface-raised p-2"><div className="flex items-center justify-between gap-2"><strong className="tabular">d{r.digit}</strong><span className="mono-label">{r.kind}</span><span className="tabular text-signal">{Math.round(r.score)}</span></div><div className="mt-1 grid grid-cols-4 gap-2 text-[9px] text-muted-foreground tabular"><span>persist {Math.round(r.persistence)}</span><span>conc {Math.round(r.concentration)}</span><span>press {Math.round(r.pressure)}</span><span>cohere {Math.round(r.coherence)}</span></div><div className="mono-label mt-1">Sentinel role · {r.sentinelRole}</div></div>;
+function ReservoirRow({ r }: { r: AuthoritativeContract["reservoirs"][number] }) {
+  return (
+    <div className="rounded border border-border bg-surface-raised p-2">
+      <div className="flex items-center justify-between gap-2">
+        <strong className="tabular">d{r.digit}</strong>
+        <span className="mono-label">{r.kind}</span>
+        <span className="tabular text-signal">{Math.round(r.score)}</span>
+      </div>
+      <div className="mt-1 grid grid-cols-4 gap-2 text-[9px] text-muted-foreground tabular">
+        <span>persist {Math.round(r.persistence)}</span>
+        <span>conc {Math.round(r.concentration)}</span>
+        <span>press {Math.round(r.pressure)}</span>
+        <span>cohere {Math.round(r.coherence)}</span>
+      </div>
+      <div className="mono-label mt-1">Sentinel role · {r.sentinelRole}</div>
+    </div>
+  );
 }
 
-function Contract({ c, active, onSelect }: { c: AuthoritativeContract; active: boolean; onSelect: () => void }) {
+function Contract({
+  c,
+  active,
+  onSelect,
+}: {
+  c: AuthoritativeContract;
+  active: boolean;
+  onSelect: () => void;
+}) {
   const idx = lifecycle.indexOf(c.state as (typeof lifecycle)[number]);
-  return <button type="button" onClick={onSelect} className={cn('panel p-3 text-left', active && 'border-signal/60 bg-signal/5')}><div className="flex items-center justify-between gap-2"><strong>{c.label}</strong><StateTag state={c.state} /></div><div className="mt-2 flex items-end justify-between"><div><div className="mono-label">Liquidity level</div><div className="tabular text-3xl">{Math.round(c.liquidityLevel)}</div></div><div className="text-right"><div className="mono-label">Accumulated reservoir</div><div className="tabular text-xl text-signal">{Math.round(c.accumulatedLiquidity)}</div></div></div><div className="mt-2 flex gap-0.5">{lifecycle.map((s,i)=><div key={s} className={cn('h-1 flex-1 rounded-full', idx >= 0 && i <= idx ? 'bg-signal' : 'bg-muted', i === idx && 'bg-accent')} />)}</div><div className="mono-label mt-1">{c.reservoirDigits.length ? `Reservoir · ${c.reservoirDigits.map(d=>`d${d}`).join(', ')}` : 'No qualifying reservoir'}</div></button>;
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={cn("panel p-3 text-left", active && "border-signal/60 bg-signal/5")}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <strong>{c.label}</strong>
+        <StateTag state={c.state} />
+      </div>
+      <div className="mt-2 flex items-end justify-between">
+        <div>
+          <div className="mono-label">Liquidity level</div>
+          <div className="tabular text-3xl">{Math.round(c.liquidityLevel)}</div>
+        </div>
+        <div className="text-right">
+          <div className="mono-label">Accumulated reservoir</div>
+          <div className="tabular text-xl text-signal">{Math.round(c.accumulatedLiquidity)}</div>
+        </div>
+      </div>
+      <div className="mt-2 flex gap-0.5">
+        {lifecycle.map((s, i) => (
+          <div
+            key={s}
+            className={cn(
+              "h-1 flex-1 rounded-full",
+              idx >= 0 && i <= idx ? "bg-signal" : "bg-muted",
+              i === idx && "bg-accent",
+            )}
+          />
+        ))}
+      </div>
+      <div className="mono-label mt-1">
+        {c.reservoirDigits.length
+          ? `Reservoir · ${c.reservoirDigits.map((d) => `d${d}`).join(", ")}`
+          : "No qualifying reservoir"}
+      </div>
+    </button>
+  );
 }
 
-export function AuthoritativeLiquidityView({ contracts, selectedContract, onSelectContract }: { contracts: AuthoritativeContract[]; selectedContract: string; onSelectContract: (id:string)=>void }) {
-  const focus = contracts.find(c=>c.id===selectedContract) ?? contracts[0];
+export function AuthoritativeLiquidityView({
+  contracts,
+  selectedContract,
+  onSelectContract,
+}: {
+  contracts: AuthoritativeContract[];
+  selectedContract: string;
+  onSelectContract: (id: string) => void;
+}) {
+  const focus = contracts.find((c) => c.id === selectedContract) ?? contracts[0];
   if (!focus) return null;
-  return <div className="flex flex-col gap-3"><div className="rounded-md border border-signal/30 bg-signal/5 px-3 py-2"><div className="mono-label text-signal">AUTHORITATIVE LIQUIDITY MODEL · v4</div><p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">Liquidity level and accumulated liquidity are intentionally separate. Red/2nd-Red are privileged Sentinel reservoir evidence, not the definition of a reservoir. A winning digit may qualify through persistent concentration, transition, pressure and multi-window coherence.</p></div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{contracts.map(c=><Contract key={c.id} c={c} active={c.id===focus.id} onSelect={()=>onSelectContract(c.id)}/>)}</div><div className="grid gap-3 lg:grid-cols-3"><Panel title="Reservoir formation" subtitle="Persistent winning-side structural evidence" className="lg:col-span-2"><div className="mb-3 grid gap-3 sm:grid-cols-3"><div><div className="mono-label">Liquidity level</div><div className="tabular text-3xl">{Math.round(focus.liquidityLevel)}</div></div><div><div className="mono-label">Accumulated liquidity</div><div className="tabular text-3xl text-signal">{Math.round(focus.accumulatedLiquidity)}</div></div><div><div className="mono-label">Reservoir score</div><div className="tabular text-3xl">{Math.round(focus.reservoirScore)}</div></div></div><div className="grid gap-2">{focus.reservoirs.length ? focus.reservoirs.map(r=><ReservoirRow key={r.digit} r={r}/>) : <Note>No qualifying reservoir evidence yet. This is different from saying that the market has zero structural liquidity.</Note>}</div></Panel><Panel title="Lifecycle evidence" subtitle="Authoritative formation state"><Meter label="Maturity" value={focus.maturity}/><Meter label="Exhaustion" value={focus.exhaustion} tone="caution"/><Meter label="Delivery" value={focus.delivery}/><Meter label="Absorption" value={focus.absorption} tone="calm"/><Meter label="Release" value={focus.release}/><Meter label="Confirmation" value={focus.confirmation}/><Meter label="Conflict" value={focus.conflict} tone="danger"/><div className="mt-3"><div className="mono-label">Sentinel psychology</div><div className="mt-1 grid grid-cols-5 gap-1 text-center tabular text-[10px]"><span>G d{focus.psychology.green}</span><span>2G d{focus.psychology.secondGreen}</span><span>R d{focus.psychology.red}</span><span>2R d{focus.psychology.secondRed}</span><span>P d{focus.psychology.purple ?? '—'}</span></div></div></Panel></div><Panel title="Qualification gates" subtitle="Ranking and qualification remain separate"><div className="flex flex-wrap items-center gap-2"><StateTag state={focus.state}/><span className="mono-label">trajectory · {focus.trajectory}</span><span className="mono-label">age · {focus.age} updates</span></div>{focus.vetoes.length ? <div className="mt-2 space-y-1">{focus.vetoes.map(v=><div key={v} className="text-[11px] text-conflict">VETO · {v}</div>)}</div> : <div className="mt-2 text-[11px] text-state-confirmed">No active hard vetoes.</div>}</Panel></div>;
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="rounded-md border border-signal/30 bg-signal/5 px-3 py-2">
+        <div className="mono-label text-signal">AUTHORITATIVE LIQUIDITY MODEL · v4</div>
+        <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+          Liquidity level and accumulated liquidity are intentionally separate. Red/2nd-Red are
+          privileged Sentinel reservoir evidence, not the definition of a reservoir. A winning digit
+          may qualify through persistent concentration, transition, pressure and multi-window
+          coherence.
+        </p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {contracts.map((c) => (
+          <Contract
+            key={c.id}
+            c={c}
+            active={c.id === focus.id}
+            onSelect={() => onSelectContract(c.id)}
+          />
+        ))}
+      </div>
+      <div className="grid gap-3 lg:grid-cols-3">
+        <Panel
+          title="Reservoir formation"
+          subtitle="Persistent winning-side structural evidence"
+          className="lg:col-span-2"
+        >
+          <div className="mb-3 grid gap-3 sm:grid-cols-3">
+            <div>
+              <div className="mono-label">Liquidity level</div>
+              <div className="tabular text-3xl">{Math.round(focus.liquidityLevel)}</div>
+            </div>
+            <div>
+              <div className="mono-label">Accumulated liquidity</div>
+              <div className="tabular text-3xl text-signal">
+                {Math.round(focus.accumulatedLiquidity)}
+              </div>
+            </div>
+            <div>
+              <div className="mono-label">Reservoir score</div>
+              <div className="tabular text-3xl">{Math.round(focus.reservoirScore)}</div>
+            </div>
+          </div>
+          <div className="grid gap-2">
+            {focus.reservoirs.length ? (
+              focus.reservoirs.map((r) => <ReservoirRow key={r.digit} r={r} />)
+            ) : (
+              <Note>
+                No qualifying reservoir evidence yet. This is different from saying that the market
+                has zero structural liquidity.
+              </Note>
+            )}
+          </div>
+        </Panel>
+        <Panel title="Lifecycle evidence" subtitle="Authoritative formation state">
+          <Meter label="Maturity" value={focus.maturity} />
+          <Meter label="Exhaustion" value={focus.exhaustion} tone="caution" />
+          <Meter label="Delivery" value={focus.delivery} />
+          <Meter label="Absorption" value={focus.absorption} tone="calm" />
+          <Meter label="Release" value={focus.release} />
+          <Meter label="Confirmation" value={focus.confirmation} />
+          <Meter label="Conflict" value={focus.conflict} tone="danger" />
+          <div className="mt-3">
+            <div className="mono-label">Sentinel psychology</div>
+            <div className="mt-1 grid grid-cols-5 gap-1 text-center tabular text-[10px]">
+              <span>G d{focus.psychology.green}</span>
+              <span>2G d{focus.psychology.secondGreen}</span>
+              <span>R d{focus.psychology.red}</span>
+              <span>2R d{focus.psychology.secondRed}</span>
+              <span>P d{focus.psychology.purple ?? "—"}</span>
+            </div>
+          </div>
+        </Panel>
+      </div>
+      <Panel title="Qualification gates" subtitle="Ranking and qualification remain separate">
+        <div className="flex flex-wrap items-center gap-2">
+          <StateTag state={focus.state} />
+          <span className="mono-label">trajectory · {focus.trajectory}</span>
+          <span className="mono-label">age · {focus.age} ticks</span>
+          {focus.qualified ? (
+            <span className="mono-label text-state-confirmed">QUALIFIED</span>
+          ) : (
+            <span className="mono-label text-muted-foreground">GATED</span>
+          )}
+        </div>
+        {focus.vetoes.length ? (
+          <div className="mt-2 space-y-1">
+            {focus.vetoes.map((v) => (
+              <div key={v} className="text-[11px] text-conflict">
+                VETO · {v}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-2 text-[11px] text-state-confirmed">No active hard vetoes.</div>
+        )}
+      </Panel>
+    </div>
+  );
 }
