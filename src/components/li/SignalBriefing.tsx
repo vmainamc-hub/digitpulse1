@@ -85,7 +85,9 @@ function aiInsight(r: ScanResult): string {
     parts.push("the engine reports all structural qualification gates satisfied");
   } else {
     const why = r.qualificationReasons?.[0] ?? r.qualificationReason;
-    parts.push(`qualification is withheld: ${String(why || "structural gates not met").toLowerCase()}`);
+    parts.push(
+      `qualification is withheld: ${String(why || "structural gates not met").toLowerCase()}`,
+    );
   }
 
   return parts.join(". ") + ".";
@@ -245,9 +247,7 @@ export function SignalBriefing({
               <div
                 className={cn(
                   "flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium",
-                  r.qualified
-                    ? "bg-calm/12 text-calm"
-                    : "bg-caution/12 text-caution",
+                  r.qualified ? "bg-calm/12 text-calm" : "bg-caution/12 text-caution",
                 )}
               >
                 {r.qualified ? (
@@ -261,12 +261,7 @@ export function SignalBriefing({
 
             {/* The two decision indicators */}
             <div className="mt-6 grid gap-4 md:grid-cols-2">
-              <Gauge
-                label="Liquidity level"
-                value={liqLevel}
-                caption={liq.label}
-                tone={liq.tone}
-              />
+              <Gauge label="Liquidity level" value={liqLevel} caption={liq.label} tone={liq.tone} />
               <Gauge
                 label="Psychology adherence"
                 value={psyPct}
@@ -278,11 +273,7 @@ export function SignalBriefing({
             {/* Supporting line */}
             <div className="mt-6 grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border/60 pt-5 md:grid-cols-5">
               <Stat label="Phase" value={r.lifecycleState.replace(/_/g, " ")} />
-              <Stat
-                label="Trajectory"
-                value={traj?.glyph ?? r.trajectory}
-                tone={traj?.tone}
-              />
+              <Stat label="Trajectory" value={traj?.glyph ?? r.trajectory} tone={traj?.tone} />
               <Stat label="Age" value={age(r)} />
               <Stat label="Evidence" value={r.multiWindowSupport} />
               <Stat label="Confirmation" value={`${Math.round(r.releaseReadiness)}%`} />
@@ -360,7 +351,10 @@ export function SignalBriefing({
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-6">
-                <Stat label="Liquidity" value={`${Math.round(bestQualified.liquidityLevel ?? 0)}`} />
+                <Stat
+                  label="Liquidity"
+                  value={`${Math.round(bestQualified.liquidityLevel ?? 0)}`}
+                />
                 <Stat
                   label="Psychology"
                   value={`${Math.round(bestQualified.psychologyAdherence ?? 0)}%`}
@@ -385,31 +379,34 @@ export function SignalBriefing({
             <div className="glass rounded-2xl p-5">
               <div className="mono-label">Evidence timeline</div>
               <ol className="mt-3 space-y-0">
-                {r.timeline.slice(-8).reverse().map((ev, i, arr) => (
-                  <li key={ev.id} className="relative flex gap-4 pb-4 last:pb-0">
-                    <div className="flex flex-col items-center">
-                      <span
-                        className={cn(
-                          "mt-1.5 size-2 shrink-0 rounded-full",
-                          i === 0 ? "bg-signal" : "bg-border-strong",
-                        )}
-                        aria-hidden
-                      />
-                      {i < arr.length - 1 ? (
-                        <span className="w-px flex-1 bg-border" aria-hidden />
-                      ) : null}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-baseline justify-between gap-2">
-                        <span className="text-sm font-medium">{ev.title}</span>
-                        <span className="mono-label tabular">{ev.timeStr}</span>
+                {r.timeline
+                  .slice(-8)
+                  .reverse()
+                  .map((ev, i, arr) => (
+                    <li key={ev.id} className="relative flex gap-4 pb-4 last:pb-0">
+                      <div className="flex flex-col items-center">
+                        <span
+                          className={cn(
+                            "mt-1.5 size-2 shrink-0 rounded-full",
+                            i === 0 ? "bg-signal" : "bg-border-strong",
+                          )}
+                          aria-hidden
+                        />
+                        {i < arr.length - 1 ? (
+                          <span className="w-px flex-1 bg-border" aria-hidden />
+                        ) : null}
                       </div>
-                      <p className="text-xs leading-relaxed text-muted-foreground">
-                        {ev.description}
-                      </p>
-                    </div>
-                  </li>
-                ))}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-baseline justify-between gap-2">
+                          <span className="text-sm font-medium">{ev.title}</span>
+                          <span className="mono-label tabular">{ev.timeStr}</span>
+                        </div>
+                        <p className="text-xs leading-relaxed text-muted-foreground">
+                          {ev.description}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
               </ol>
             </div>
           ) : null}

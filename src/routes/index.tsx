@@ -227,87 +227,88 @@ function Console() {
                 activeMarketSymbol={selected}
               />
 
-
-          <div className="panel mb-3 flex flex-wrap items-center gap-4 px-3 py-2">
-            <div>
-              <div className="mono-label">{current?.symbol}</div>
-              <h2 className="text-base font-semibold">{current?.name}</h2>
-            </div>
-            <div className="tabular flex flex-wrap items-center gap-4 text-xs">
-              <span>
-                <span className="mono-label mr-1">quote</span>
-                {current?.last ?? "—"}
-              </span>
-              <span>
-                <span className="mono-label mr-1">last digit</span>
-                <b className="text-signal">{analysis?.last ?? "—"}</b>
-              </span>
-              <span>
-                <span className="mono-label mr-1">sample</span>
-                {analysis?.sample ?? current?.history.length ?? 0}
-              </span>
-              <span>
-                <span className="mono-label mr-1">regime</span>
-                {analysis?.regime.state ?? "—"}
-              </span>
-            </div>
-            {analysis ? (
-              <div className="ml-auto flex items-center gap-2">
-                <span className="mono-label">top structure</span>
-                <span className="tabular text-xs">{analysis.top.label}</span>
-                <StateTag state={analysis.top.state} />
+              <div className="panel mb-3 flex flex-wrap items-center gap-4 px-3 py-2">
+                <div>
+                  <div className="mono-label">{current?.symbol}</div>
+                  <h2 className="text-base font-semibold">{current?.name}</h2>
+                </div>
+                <div className="tabular flex flex-wrap items-center gap-4 text-xs">
+                  <span>
+                    <span className="mono-label mr-1">quote</span>
+                    {current?.last ?? "—"}
+                  </span>
+                  <span>
+                    <span className="mono-label mr-1">last digit</span>
+                    <b className="text-signal">{analysis?.last ?? "—"}</b>
+                  </span>
+                  <span>
+                    <span className="mono-label mr-1">sample</span>
+                    {analysis?.sample ?? current?.history.length ?? 0}
+                  </span>
+                  <span>
+                    <span className="mono-label mr-1">regime</span>
+                    {analysis?.regime.state ?? "—"}
+                  </span>
+                </div>
+                {analysis ? (
+                  <div className="ml-auto flex items-center gap-2">
+                    <span className="mono-label">top structure</span>
+                    <span className="tabular text-xs">{analysis.top.label}</span>
+                    <StateTag state={analysis.top.state} />
+                  </div>
+                ) : null}
               </div>
-            ) : null}
-          </div>
 
-          {confirmed.length > 0 ? (
-            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-state-confirmed/40 bg-state-confirmed/5 px-3 py-2">
-              <span className="mono-label text-state-confirmed">Universe confirmations</span>
-              {confirmed.map((c) => (
-                <button
-                  key={`${c.symbol}-${c.id}`}
-                  type="button"
-                  onClick={() => setSelected(c.symbol)}
-                  className="tabular rounded border border-border-strong px-2 py-0.5 text-[11px] hover:border-signal"
-                >
-                  {c.symbol} · {c.label} · {Math.round(c.confirmation)}
-                </button>
-              ))}
+              {confirmed.length > 0 ? (
+                <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-state-confirmed/40 bg-state-confirmed/5 px-3 py-2">
+                  <span className="mono-label text-state-confirmed">Universe confirmations</span>
+                  {confirmed.map((c) => (
+                    <button
+                      key={`${c.symbol}-${c.id}`}
+                      type="button"
+                      onClick={() => setSelected(c.symbol)}
+                      className="tabular rounded border border-border-strong px-2 py-0.5 text-[11px] hover:border-signal"
+                    >
+                      {c.symbol} · {c.label} · {Math.round(c.confirmation)}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
+              {tab === "RADAR" && (
+                <RadarView zones={zones} snap={opportunities} onSelectMarket={setSelected} />
+              )}
+              {tab === "LEDGER" && <LedgerView zones={zones} snap={opportunities} />}
+
+              {tab === "RADAR" || tab === "LEDGER" ? null : !analysis ? (
+                <div className="panel flex h-64 items-center justify-center text-sm text-muted-foreground">
+                  Seeding the 15-market reservoir from Deriv public market data…
+                </div>
+              ) : (
+                <>
+                  {tab === "LIQUIDITY" && (
+                    <LiquidityView
+                      a={analysis}
+                      selectedContract={contractFocus}
+                      onSelectContract={setContractFocus}
+                    />
+                  )}
+                  {tab === "PSYCHOLOGY" && <PsychologyView a={analysis} />}
+                  {tab === "DANGER" && <DangerView a={analysis} />}
+                  {tab === "MATRIX" && <MatrixView markets={markets} onSelect={setSelected} />}
+                  {tab === "RESEARCH" && (
+                    <ResearchView
+                      a={analysis}
+                      observations={observations}
+                      onRecord={record}
+                      onClear={() => journal.clear()}
+                      onExport={exportCsv}
+                    />
+                  )}
+                </>
+              )}
             </div>
           ) : null}
-
-          {tab === "RADAR" && (
-            <RadarView zones={zones} snap={opportunities} onSelectMarket={setSelected} />
-          )}
-          {tab === "LEDGER" && <LedgerView zones={zones} snap={opportunities} />}
-
-          {tab === "RADAR" || tab === "LEDGER" ? null : !analysis ? (
-            <div className="panel flex h-64 items-center justify-center text-sm text-muted-foreground">
-              Seeding the 15-market reservoir from Deriv public market data…
-            </div>
-          ) : (
-            <>
-              {tab === "LIQUIDITY" && (
-                <LiquidityView
-                  a={analysis}
-                  selectedContract={contractFocus}
-                  onSelectContract={setContractFocus}
-                />
-              )}
-              {tab === "PSYCHOLOGY" && <PsychologyView a={analysis} />}
-              {tab === "DANGER" && <DangerView a={analysis} />}
-              {tab === "MATRIX" && <MatrixView markets={markets} onSelect={setSelected} />}
-              {tab === "RESEARCH" && (
-                <ResearchView
-                  a={analysis}
-                  observations={observations}
-                  onRecord={record}
-                  onClear={() => journal.clear()}
-                  onExport={exportCsv}
-                />
-              )}
-            </>
-          )}
 
           <footer className="mono-label mt-4 border-t border-border pt-3 leading-relaxed">
             Research instrument. Outputs are observed statistical and psychological patterns in
