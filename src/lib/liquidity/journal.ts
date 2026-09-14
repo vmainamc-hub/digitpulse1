@@ -3,12 +3,11 @@
  *
  * Immutable observation records keyed by observation ID. Persisted locally so a
  * continuous monitoring session survives a reload. Nothing is auto-traded and
- * nothing is fed back into production intelligence.
+ * nothing is fed back into the engine.
  */
 
 import { ANALYSIS_VERSION } from "./universe";
 import type { ContractAnalysis, MarketAnalysis } from "./engine";
-import type { AuthoritativeContract, AuthoritativeMarketAnalysis } from "./authoritative-v4";
 
 export interface Observation {
   id: string;
@@ -59,55 +58,9 @@ function persist(next: Observation[]) {
   try {
     window.localStorage.setItem(KEY, JSON.stringify(cache));
   } catch {
-    /* memory-only fallback */
+    /* storage unavailable — journal stays in memory */
   }
   for (const fn of listeners) fn();
-}
-
-function makeObservation(
-  symbol: string,
-  market: string,
-  analysisId: string,
-  sample: number,
-  contract: Pick<
-    AuthoritativeContract,
-    | "id"
-    | "label"
-    | "state"
-    | "confirmation"
-    | "maturity"
-    | "release"
-    | "danger"
-    | "conflict"
-    | "liquidityLevel"
-    | "accumulatedLiquidity"
-    | "supportCount"
-  > &
-    Partial<Pick<AuthoritativeContract, "creation">>,
-  note: string,
-  extra: { regime: string; sweep: string; entropy: number },
-): Observation {
-  return {
-    id: `${analysisId}-${contract.id}`,
-    createdAt: Date.now(),
-    symbol,
-    market,
-    contract: contract.label,
-    state: contract.state,
-    confirmation: Math.round(contract.confirmation),
-    creation: Math.round(contract.creation ?? 0),
-    maturity: Math.round(contract.maturity),
-    release: Math.round(contract.release),
-    danger: Math.round(contract.danger),
-    conflict: Math.round(contract.conflict),
-    supportCount: contract.supportCount ?? 0,
-    regime: extra.regime,
-    sweep: extra.sweep,
-    entropy: Math.round(extra.entropy),
-    sample,
-    note,
-    version: ANALYSIS_VERSION,
-  };
 }
 
 export const journal = {
@@ -123,8 +76,6 @@ export const journal = {
   getServerSnapshot(): Observation[] {
     return EMPTY_OBSERVATIONS;
   },
-
-  /** Legacy compatibility only; no live production caller uses this path. */
   record(
     symbol: string,
     market: string,
@@ -159,28 +110,6 @@ export const journal = {
     persist([obs, ...existing]);
     return obs;
   },
-
-  /** Canonical UI journal entry sourced only from the authoritative production contract. */
-  recordAuthoritative(
-    symbol: string,
-    market: string,
-    analysis: AuthoritativeMarketAnalysis,
-    contract: AuthoritativeContract,
-    note: string,
-  ): Observation | null {
-    const existing = load();
-    const id = `${symbol}:${analysis.tickCount}:${contract.id}`;
-    if (existing.some((o) => o.id === id)) return null;
-    const obs = makeObservation(symbol, market, id, analysis.sample, contract, note, {
-      regime: contract.qualificationStatus,
-      sweep:
-        contract.state === "RELEASE" || contract.state === "RELEASE_WATCH" ? "RELEASE" : "NONE",
-      entropy: contract.entropyVelocity ?? 0,
-    });
-    persist([obs, ...existing]);
-    return obs;
-  },
-
   clear() {
     persist([]);
   },

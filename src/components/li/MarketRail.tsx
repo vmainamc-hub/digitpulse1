@@ -28,7 +28,7 @@ export function MarketRail({
             {markets
               .filter((m) => m.group === group)
               .map((m) => {
-                const a = m.authoritative;
+                const a = m.analysis;
                 const isSelected = m.symbol === selected;
                 return (
                   <button

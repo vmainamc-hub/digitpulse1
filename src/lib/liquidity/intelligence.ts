@@ -1,25 +1,25 @@
 /**
- * Production intelligence coordinator.
+ * Intelligence store (PHASE 2 + 12).
  *
- * SINGLE CANONICAL PRODUCTION PATH:
- * DERIV FEED -> AUTHORITATIVE V4 -> PRODUCTION CONTRACT -> RANK / QUALIFY -> UI
+ * DERIV TICK -> CANONICAL MARKET STATE -> SHARED FEATURE SNAPSHOT ->
+ * CONTRACT PROJECTIONS -> OPPORTUNITY ENGINE -> UI
  *
- * The legacy engine, scanner and opportunity/zone writers are deliberately not
- * executed from the live production cycle. Existing UI compatibility fields remain
- * present so research surfaces can migrate without creating a second decision path.
+ * Shared features are computed once per market per changed tick and reused by
+ * every consumer. The UI subscribes read-only and never feeds data back.
  */
 
 import { getFeed, type FeedSnapshot, type MarketState } from "./feed";
-import { EMPTY_OPPORTUNITY_SNAPSHOT, type OpportunitySnapshot } from "./opportunity";
-import { getZoneRegistry, type ZoneRegistrySnapshot } from "./zones";
-import { analyzeAuthoritativeProductionMarket } from "./authoritative-production";
-import type { MarketAnalysis } from "./engine";
-import type { AuthoritativeMarketAnalysis } from "./authoritative-v4";
+import { analyzeMarket, type MarketAnalysis } from "./engine";
+import {
+  EMPTY_OPPORTUNITY_SNAPSHOT,
+  OpportunityStore,
+  type OpportunitySnapshot,
+} from "./opportunity";
+import { getZoneRegistry, ZoneRegistry, type ZoneRegistrySnapshot } from "./zones";
+import { getLiquidityScanner } from "./scanner";
 
 export interface ComputedMarket extends MarketState {
-  /** Compatibility-only field. Production decisions never read this legacy analysis. */
   analysis: MarketAnalysis | null;
-  authoritative: AuthoritativeMarketAnalysis | null;
 }
 
 export interface IntelligenceSnapshot {
@@ -35,12 +35,10 @@ export interface IntelligenceSnapshot {
 const CYCLE_INTERVAL = 900;
 
 class Intelligence {
+  private store = new OpportunityStore();
   private zoneRegistry = getZoneRegistry();
   private listeners = new Set<() => void>();
-  private cache = new Map<
-    string,
-    { stamp: string; authoritative: AuthoritativeMarketAnalysis | null }
-  >();
+  private cache = new Map<string, { stamp: string; analysis: MarketAnalysis | null }>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private started = false;
   private version = 0;
@@ -56,7 +54,7 @@ class Intelligence {
     this.snapshot = {
       version: 0,
       feed: this.pendingFeed,
-      markets: this.pendingFeed.markets.map((m) => ({ ...m, analysis: null, authoritative: null })),
+      markets: this.pendingFeed.markets.map((m) => ({ ...m, analysis: null })),
       opportunities: EMPTY_OPPORTUNITY_SNAPSHOT,
       zones: this.zoneRegistry.snapshot,
       cycleMs: 0,
@@ -65,7 +63,10 @@ class Intelligence {
   }
 
   getSnapshot = (): IntelligenceSnapshot => this.snapshot;
+
   getServerSnapshot = (): IntelligenceSnapshot => this.snapshot;
+
+  getZoneRegistry = (): ZoneRegistry => this.zoneRegistry;
 
   subscribe = (fn: () => void) => {
     this.listeners.add(fn);
@@ -93,42 +94,42 @@ class Intelligence {
     this.timer = null;
     this.unsubscribeFeed?.();
     this.unsubscribeFeed = null;
-    getFeed().stop();
     this.started = false;
   }
 
+  /** One analysis cycle over the whole universe. */
   private cycle() {
     const feed = getFeed();
     const t0 = performance.now();
     feed.reportEngine(true, this.cycleMs);
     const snap = this.pendingFeed;
     const markets: ComputedMarket[] = [];
+    const activeKeys = new Set<string>();
 
     for (const m of snap.markets) {
       const latest = m.history[m.history.length - 1];
-      const stamp = `${m.history.length}:${latest?.t ?? 0}:${latest?.q ?? 0}:${m.ticks}`;
+      const stamp = `${m.history.length}:${latest?.t ?? 0}:${latest?.q ?? 0}`;
       const cached = this.cache.get(m.symbol);
-      const prevAuth = cached?.authoritative?.contracts
-        ? Object.fromEntries(cached.authoritative.contracts.map((c) => [c.id, c]))
-        : {};
+      // Shared feature computation is skipped entirely when the market has not
+      // advanced since the previous cycle.
+      const prevV3 = cached?.analysis?.v3Opportunities ?? {};
+      const analysis =
+        cached?.stamp === stamp ? cached.analysis : analyzeMarket(m.history, m.symbol, prevV3);
+      if (cached?.stamp !== stamp) this.cache.set(m.symbol, { stamp, analysis });
+      markets.push({ ...m, analysis });
 
-      const authoritative =
-        cached?.stamp === stamp
-          ? cached.authoritative
-          : analyzeAuthoritativeProductionMarket(m.history, m.symbol, m.ticks, prevAuth);
-
-      if (cached?.stamp !== stamp) {
-        this.cache.set(m.symbol, { stamp, authoritative });
+      if (analysis) {
+        this.store.ingest(m.symbol, m.name, m.group, analysis, latest?.t ?? 0);
+        for (const c of analysis.contracts) {
+          activeKeys.add(`${m.symbol}:${c.id}`);
+          this.zoneRegistry.ingest(m.symbol, m.name, m.group, analysis, c, latest?.t ?? 0);
+        }
       }
-
-      markets.push({
-        ...m,
-        // Never run the legacy engine here. It is no longer a competing production path.
-        analysis: null,
-        authoritative,
-      });
     }
 
+    const opportunities = this.store.finalize(activeKeys);
+    const zones = this.zoneRegistry.finalize();
+    getLiquidityScanner().onEngineCycle(this.zoneRegistry);
     this.cycleMs = performance.now() - t0;
     this.cycles++;
     this.version++;
@@ -138,8 +139,8 @@ class Intelligence {
       version: this.version,
       feed: snap,
       markets,
-      opportunities: EMPTY_OPPORTUNITY_SNAPSHOT,
-      zones: this.zoneRegistry.snapshot,
+      opportunities,
+      zones,
       cycleMs: this.cycleMs,
       cycles: this.cycles,
     };

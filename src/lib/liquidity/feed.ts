@@ -291,26 +291,8 @@ class DerivFeed {
     }, 20_000);
     // Refresh history whenever live stream is silent so the analytics keep advancing
     this.pollTimer = setInterval(() => this.pollHistory(), POLL_INTERVAL);
-    window.addEventListener("online", this.handleWake);
-    document.addEventListener("visibilitychange", this.handleWake);
     this.connect();
   }
-
-  private handleWake = () => {
-    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
-    const now = Date.now();
-    // If socket is closed/broken or silent for more than TICK_SILENCE_MS, reconnect immediately
-    if (
-      !this.socket ||
-      this.socket.readyState !== 1 ||
-      (this.lastTickAt && now - this.lastTickAt > TICK_SILENCE_MS)
-    ) {
-      this.reconnect();
-    } else if (this.socket.readyState === 1) {
-      this.send(this.socket, { ping: 1 }, { kind: "PING", at: now });
-      this.pollHistory();
-    }
-  };
 
   private send(socket: WebSocket, payload: Record<string, unknown>, pending: Pending) {
     const id = ++this.reqId;
@@ -520,10 +502,6 @@ class DerivFeed {
   }
 
   stop() {
-    if (typeof window !== "undefined") {
-      window.removeEventListener("online", this.handleWake);
-      document.removeEventListener("visibilitychange", this.handleWake);
-    }
     if (this.emitTimer) clearInterval(this.emitTimer);
     if (this.pollTimer) clearInterval(this.pollTimer);
     if (this.pingTimer) clearInterval(this.pingTimer);

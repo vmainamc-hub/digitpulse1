@@ -11,7 +11,6 @@ import { StateTag } from "@/components/li/primitives";
 import { LedgerView, RadarView } from "@/components/li/radar";
 import { BestLiquidityPanel } from "@/components/li/BestLiquidityPanel";
 import { SignalBriefing } from "@/components/li/SignalBriefing";
-import { AuthoritativeLiquidityView } from "@/components/li/AuthoritativeLiquidityView";
 import {
   DangerView,
   LiquidityView,
@@ -43,39 +42,36 @@ export const Route = createFileRoute("/")({
 });
 
 const TABS = [
+  ["RADAR", "Active Liquidity Zones"],
+  ["LEDGER", "Formation Ledger"],
   ["LIQUIDITY", "Liquidity Structure"],
   ["PSYCHOLOGY", "Sentinel Psychology"],
   ["DANGER", "Danger Lab"],
   ["MATRIX", "Contract Matrix"],
   ["RESEARCH", "Research Core"],
-  ["RADAR", "Zone Radar (Legacy)"],
-  ["LEDGER", "Formation Ledger (Legacy)"],
 ] as const;
+
 type Tab = (typeof TABS)[number][0];
 
 function Console() {
   const { snapshot, markets, opportunities, zones, cycleMs } = useIntelligence();
   const observations = useJournal();
   const [selected, setSelected] = useState("R_75");
-  const [tab, setTab] = useState<Tab>("LIQUIDITY");
+  const [tab, setTab] = useState<Tab>("RADAR");
   const [contractFocus, setContractFocus] = useState("");
   const [railOpen, setRailOpen] = useState(false);
   const [advanced, setAdvanced] = useState(false);
 
   const current = markets.find((m) => m.symbol === selected) ?? markets[0];
-  const analysis = current?.authoritative ?? null;
+  const analysis = current?.analysis ?? null;
 
   const confirmed = useMemo(
     () =>
       markets
         .flatMap((m) =>
-          (m.authoritative?.contracts ?? []).map((c) => ({
-            ...c,
-            market: m.name,
-            symbol: m.symbol,
-          })),
+          (m.analysis?.contracts ?? []).map((c) => ({ ...c, market: m.name, symbol: m.symbol })),
         )
-        .filter((c) => c.qualified)
+        .filter((c) => c.state === "CONFIRMED")
         .sort((a, b) => b.confirmation - a.confirmation)
         .slice(0, 6),
     [markets],
@@ -84,7 +80,7 @@ function Console() {
   const record = () => {
     if (!analysis || !current) return;
     const c = analysis.contracts.find((x) => x.id === contractFocus) ?? analysis.top;
-    journal.recordAuthoritative(current.symbol, current.name, analysis, c, "Manual observation");
+    journal.record(current.symbol, current.name, analysis, c, "Manual observation");
   };
 
   const exportCsv = () => {
@@ -112,6 +108,7 @@ function Console() {
               <p className="mono-label">Observable microstructure research · read-only</p>
             </div>
           </div>
+
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <span className="mono-label flex items-center gap-1.5 rounded border border-border px-2 py-1">
               <span
@@ -119,6 +116,7 @@ function Console() {
                   "size-1.5 rounded-full",
                   snapshot.connection === "LIVE" ? "live-dot bg-calm" : "bg-caution",
                 )}
+                aria-hidden
               />
               {snapshot.connection}
             </span>
@@ -146,6 +144,7 @@ function Console() {
             </button>
           </div>
         </div>
+
         <nav className="flex items-center gap-1 overflow-x-auto border-t border-border px-3 py-1.5">
           <button
             type="button"
@@ -157,17 +156,15 @@ function Console() {
           >
             {advanced ? "Hide advanced intelligence" : "Advanced intelligence"}
           </button>
-          {advanced && (
+          {advanced ? (
             <>
-              {
-                <button
-                  type="button"
-                  onClick={() => setRailOpen((v) => !v)}
-                  className="mono-label rounded border border-border px-2 py-1 lg:hidden"
-                >
-                  Markets
-                </button>
-              }
+              <button
+                type="button"
+                onClick={() => setRailOpen((v) => !v)}
+                className="mono-label rounded border border-border px-2 py-1 lg:hidden"
+              >
+                Markets
+              </button>
               {TABS.map(([k, label]) => (
                 <button
                   key={k}
@@ -184,9 +181,10 @@ function Console() {
                 </button>
               ))}
             </>
-          )}
+          ) : null}
         </nav>
       </header>
+
       <div className="flex">
         <aside
           className={cn(
@@ -204,6 +202,7 @@ function Console() {
             }}
           />
         </aside>
+
         <main
           className={cn(
             "mx-auto min-w-0 flex-1 px-4 py-6 md:px-6",
@@ -219,13 +218,15 @@ function Console() {
             }}
             activeMarketSymbol={selected}
           />
-          {advanced && (
+
+          {advanced ? (
             <div className="mt-8 space-y-3">
               <BestLiquidityPanel
                 onSelectMarket={(s) => setSelected(s)}
                 onSelectContract={(c) => setContractFocus(c)}
                 activeMarketSymbol={selected}
               />
+
               <div className="panel mb-3 flex flex-wrap items-center gap-4 px-3 py-2">
                 <div>
                   <div className="mono-label">{current?.symbol}</div>
@@ -238,28 +239,29 @@ function Console() {
                   </span>
                   <span>
                     <span className="mono-label mr-1">last digit</span>
-                    <b className="text-signal">{current?.history.at(-1)?.d ?? "—"}</b>
+                    <b className="text-signal">{analysis?.last ?? "—"}</b>
                   </span>
                   <span>
                     <span className="mono-label mr-1">sample</span>
                     {analysis?.sample ?? current?.history.length ?? 0}
                   </span>
                   <span>
-                    <span className="mono-label mr-1">state</span>
-                    {analysis?.top.state ?? "—"}
+                    <span className="mono-label mr-1">regime</span>
+                    {analysis?.regime.state ?? "—"}
                   </span>
                 </div>
-                {analysis && (
+                {analysis ? (
                   <div className="ml-auto flex items-center gap-2">
                     <span className="mono-label">top structure</span>
                     <span className="tabular text-xs">{analysis.top.label}</span>
                     <StateTag state={analysis.top.state} />
                   </div>
-                )}
+                ) : null}
               </div>
-              {confirmed.length > 0 && (
+
+              {confirmed.length > 0 ? (
                 <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-state-confirmed/40 bg-state-confirmed/5 px-3 py-2">
-                  <span className="mono-label text-state-confirmed">Universe qualified</span>
+                  <span className="mono-label text-state-confirmed">Universe confirmations</span>
                   {confirmed.map((c) => (
                     <button
                       key={`${c.symbol}-${c.id}`}
@@ -271,42 +273,43 @@ function Console() {
                     </button>
                   ))}
                 </div>
-              )}
+              ) : null}
+
               {tab === "RADAR" && (
                 <RadarView zones={zones} snap={opportunities} onSelectMarket={setSelected} />
               )}
               {tab === "LEDGER" && <LedgerView zones={zones} snap={opportunities} />}
-              {tab !== "RADAR" &&
-                tab !== "LEDGER" &&
-                (!analysis ? (
-                  <div className="panel flex h-64 items-center justify-center text-sm text-muted-foreground">
-                    Seeding the 15-market reservoir from Deriv public market data…
-                  </div>
-                ) : (
-                  <>
-                    {tab === "LIQUIDITY" && (
-                      <LiquidityView
-                        a={analysis}
-                        selectedContract={contractFocus}
-                        onSelectContract={setContractFocus}
-                      />
-                    )}
-                    {tab === "PSYCHOLOGY" && <PsychologyView a={analysis} />}
-                    {tab === "DANGER" && <DangerView a={analysis} />}
-                    {tab === "MATRIX" && <MatrixView markets={markets} onSelect={setSelected} />}
-                    {tab === "RESEARCH" && (
-                      <ResearchView
-                        a={analysis}
-                        observations={observations}
-                        onRecord={record}
-                        onClear={() => journal.clear()}
-                        onExport={exportCsv}
-                      />
-                    )}
-                  </>
-                ))}
+
+              {tab === "RADAR" || tab === "LEDGER" ? null : !analysis ? (
+                <div className="panel flex h-64 items-center justify-center text-sm text-muted-foreground">
+                  Seeding the 15-market reservoir from Deriv public market data…
+                </div>
+              ) : (
+                <>
+                  {tab === "LIQUIDITY" && (
+                    <LiquidityView
+                      a={analysis}
+                      selectedContract={contractFocus}
+                      onSelectContract={setContractFocus}
+                    />
+                  )}
+                  {tab === "PSYCHOLOGY" && <PsychologyView a={analysis} />}
+                  {tab === "DANGER" && <DangerView a={analysis} />}
+                  {tab === "MATRIX" && <MatrixView markets={markets} onSelect={setSelected} />}
+                  {tab === "RESEARCH" && (
+                    <ResearchView
+                      a={analysis}
+                      observations={observations}
+                      onRecord={record}
+                      onClear={() => journal.clear()}
+                      onExport={exportCsv}
+                    />
+                  )}
+                </>
+              )}
             </div>
-          )}
+          ) : null}
+
           <footer className="mono-label mt-4 border-t border-border pt-3 leading-relaxed">
             Research instrument. Outputs are observed statistical and psychological patterns in
             public tick data — not validated probabilities, not order-book liquidity, and not a
