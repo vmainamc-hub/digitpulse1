@@ -111,9 +111,11 @@ function strictify(
       contract.reservoirScore * 0.45 +
         contract.delivery * 0.25 +
         (contract.reservoirs.reduce((sum, r) => sum + r.persistence, 0) /
-          contract.reservoirs.length) * 0.2 +
+          contract.reservoirs.length) *
+          0.2 +
         (contract.reservoirs.reduce((sum, r) => sum + r.coherence, 0) /
-          contract.reservoirs.length) * 0.1,
+          contract.reservoirs.length) *
+          0.1,
     );
     const previousAccum = previous?.accumulatedLiquidity ?? 0;
     if (previousAccum === 0) {
@@ -139,14 +141,20 @@ function strictify(
 
   const vetoes = contract.vetoes.filter(
     (v) =>
-      !/Insufficient formation age|Insufficient accumulated liquidity|Elevated structural conflict/i.test(v),
+      !/Insufficient formation age|Insufficient accumulated liquidity|Elevated structural conflict/i.test(
+        v,
+      ),
   );
   if (!passesAge) vetoes.push(`Insufficient formation age (${age}/${STRICT.age} ticks)`);
   if (!passesAccumulation) {
-    vetoes.push(`Insufficient accumulated liquidity (${Math.round(accumulatedLiquidity)}/${STRICT.accumulatedLiquidity})`);
+    vetoes.push(
+      `Insufficient accumulated liquidity (${Math.round(accumulatedLiquidity)}/${STRICT.accumulatedLiquidity})`,
+    );
   }
   if (!passesConflict) {
-    vetoes.push(`Elevated structural conflict (${Math.round(contract.conflict)}/${STRICT.conflictMaxExclusive})`);
+    vetoes.push(
+      `Elevated structural conflict (${Math.round(contract.conflict)}/${STRICT.conflictMaxExclusive})`,
+    );
   }
 
   const qualified =

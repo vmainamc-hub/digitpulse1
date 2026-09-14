@@ -45,11 +45,19 @@ assert.ok(first, "40 ticks should be enough to produce an analysis");
 const previous = Object.fromEntries(first!.contracts.map((c) => [c.id, c]));
 const sameTickCount = analyzeAuthoritativeProductionMarket(history, "TEST", 100, previous);
 assert.ok(sameTickCount);
-assert.equal(sameTickCount!.contracts[0].age, first!.contracts[0].age, "age must not advance without new ticks");
+assert.equal(
+  sameTickCount!.contracts[0].age,
+  first!.contracts[0].age,
+  "age must not advance without new ticks",
+);
 
 const advanced = analyzeAuthoritativeProductionMarket(history, "TEST", 105, previous);
 assert.ok(advanced);
-assert.equal(advanced!.contracts[0].age, first!.contracts[0].age + 5, "age must use cumulative feed ticks");
+assert.equal(
+  advanced!.contracts[0].age,
+  first!.contracts[0].age + 5,
+  "age must use cumulative feed ticks",
+);
 assert.equal(advanced!.tickCount, 105, "market tickCount must remain cumulative");
 
 for (const c of advanced!.contracts) {
@@ -64,6 +72,10 @@ for (const c of advanced!.contracts) {
   }
 }
 
-assert.equal(CONTRACTS.length, advanced!.contracts.length, "all canonical contracts must be ranked by the same authority");
+assert.equal(
+  CONTRACTS.length,
+  advanced!.contracts.length,
+  "all canonical contracts must be ranked by the same authority",
+);
 
 console.log("authoritative-production tests passed");

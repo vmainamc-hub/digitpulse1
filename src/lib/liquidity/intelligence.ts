@@ -37,7 +37,10 @@ const CYCLE_INTERVAL = 900;
 class Intelligence {
   private zoneRegistry = getZoneRegistry();
   private listeners = new Set<() => void>();
-  private cache = new Map<string, { stamp: string; authoritative: AuthoritativeMarketAnalysis | null }>();
+  private cache = new Map<
+    string,
+    { stamp: string; authoritative: AuthoritativeMarketAnalysis | null }
+  >();
   private timer: ReturnType<typeof setInterval> | null = null;
   private started = false;
   private version = 0;
@@ -109,9 +112,10 @@ class Intelligence {
         ? Object.fromEntries(cached.authoritative.contracts.map((c) => [c.id, c]))
         : {};
 
-      const authoritative = cached?.stamp === stamp
-        ? cached.authoritative
-        : analyzeAuthoritativeProductionMarket(m.history, m.symbol, m.ticks, prevAuth);
+      const authoritative =
+        cached?.stamp === stamp
+          ? cached.authoritative
+          : analyzeAuthoritativeProductionMarket(m.history, m.symbol, m.ticks, prevAuth);
 
       if (cached?.stamp !== stamp) {
         this.cache.set(m.symbol, { stamp, authoritative });

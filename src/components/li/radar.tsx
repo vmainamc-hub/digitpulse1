@@ -458,16 +458,20 @@ export function RadarView({
 
   return (
     <div className="space-y-4">
-      {/* Top Banner: Architecture Principle */}
-      <div className="rounded border border-signal/30 bg-signal/5 px-3.5 py-2.5 font-mono text-xs">
+      {/* Top Banner: Architecture Principle & Legacy Warning */}
+      <div className="rounded border border-warning/40 bg-warning/5 px-3.5 py-2.5 font-mono text-xs">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <strong className="text-foreground font-semibold">
-              PERSISTENT LIQUIDITY INTELLIGENCE (LAYER B)
-            </strong>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">
-              A tick is an observation. Accumulated evidence builds liquidity formation over time.
-              Zones maintain stable identity and slot positions.
+            <div className="flex items-center gap-2">
+              <span className="rounded bg-warning/20 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
+                LEGACY RESEARCH VIEW · NON-AUTHORITATIVE
+              </span>
+              <strong className="text-foreground font-semibold">ZONE RADAR</strong>
+            </div>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Live production intelligence is strictly powered by the Authoritative Sentinel
+              Pipeline (Liquidity Structure / Best Liquidity). This view is an isolated
+              historical/legacy research model and does not participate in production intelligence.
             </p>
           </div>
           <div className="flex items-center gap-2 text-[11px]">
@@ -614,47 +618,58 @@ export function LedgerView({
   }, [zones?.ledger, filter]);
 
   return (
-    <Panel
-      title="FORMATION LEDGER"
-      subtitle="Historical structural transitions attached to persistent identities — no tick noise"
-      actions={
-        <input
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder="Filter market / contract / state..."
-          className="mono-label w-52 rounded border border-border bg-transparent px-2 py-1 outline-none focus:border-signal text-xs"
-        />
-      }
-    >
-      <ul className="max-h-[72vh] space-y-2 overflow-y-auto font-mono text-[11px]">
-        {events.length ? (
-          events.map((ev) => (
-            <li key={ev.id} className="border-b border-border/50 pb-2 last:border-0">
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-muted-foreground">{clock(ev.at)}</span>
-                  <span className="text-[10px] text-muted-foreground">tick {ev.tick}</span>
-                  <span className="font-semibold text-foreground">
-                    {ev.symbol} · {ev.contract}
-                  </span>
+    <div className="space-y-3">
+      <div className="rounded border border-warning/40 bg-warning/5 px-3.5 py-2 font-mono text-xs">
+        <span className="rounded bg-warning/20 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
+          LEGACY RESEARCH VIEW · NON-AUTHORITATIVE
+        </span>
+        <span className="ml-2 text-[11px] text-muted-foreground">
+          Historical formation transitions from the legacy experimental zone ledger. Does not
+          participate in production intelligence.
+        </span>
+      </div>
+      <Panel
+        title="FORMATION LEDGER"
+        subtitle="Historical structural transitions attached to persistent identities — no tick noise"
+        actions={
+          <input
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Filter market / contract / state..."
+            className="mono-label w-52 rounded border border-border bg-transparent px-2 py-1 outline-none focus:border-signal text-xs"
+          />
+        }
+      >
+        <ul className="max-h-[72vh] space-y-2 overflow-y-auto font-mono text-[11px]">
+          {events.length ? (
+            events.map((ev) => (
+              <li key={ev.id} className="border-b border-border/50 pb-2 last:border-0">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-muted-foreground">{clock(ev.at)}</span>
+                    <span className="text-[10px] text-muted-foreground">tick {ev.tick}</span>
+                    <span className="font-semibold text-foreground">
+                      {ev.symbol} · {ev.contract}
+                    </span>
+                  </div>
+                  <StateTag state={ev.state} className="text-[9px]" />
                 </div>
-                <StateTag state={ev.state} className="text-[9px]" />
-              </div>
-              <p className="mt-1 text-xs text-foreground/90 font-medium">
-                {ev.type}: {ev.description}
-              </p>
-              <div className="mt-0.5 flex items-center justify-between text-[10px] text-muted-foreground">
-                <span>{ev.zoneId}</span>
-                <span>{ev.evidenceSummary}</span>
-              </div>
+                <p className="mt-1 text-xs text-foreground/90 font-medium">
+                  {ev.type}: {ev.description}
+                </p>
+                <div className="mt-0.5 flex items-center justify-between text-[10px] text-muted-foreground">
+                  <span>{ev.zoneId}</span>
+                  <span>{ev.evidenceSummary}</span>
+                </div>
+              </li>
+            ))
+          ) : (
+            <li className="py-8 text-center text-muted-foreground">
+              No formation events recorded yet. Formations accumulate over time.
             </li>
-          ))
-        ) : (
-          <li className="py-8 text-center text-muted-foreground">
-            No formation events recorded yet. Formations accumulate over time.
-          </li>
-        )}
-      </ul>
-    </Panel>
+          )}
+        </ul>
+      </Panel>
+    </div>
   );
 }

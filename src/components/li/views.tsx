@@ -1,52 +1,559 @@
 import { cn } from "@/lib/utils";
 import { LIQUIDITY_LAWS, ANALYSIS_VERSION } from "@/lib/liquidity/universe";
-import type { AuthoritativeContract, AuthoritativeMarketAnalysis, AuthoritativeLifecycle } from "@/lib/liquidity/authoritative-v4";
+import type {
+  AuthoritativeContract,
+  AuthoritativeMarketAnalysis,
+  AuthoritativeLifecycle,
+} from "@/lib/liquidity/authoritative-v4";
 import type { ComputedMarket } from "@/lib/liquidity/useIntelligence";
 import type { Observation } from "@/lib/liquidity/journal";
 import { Meter, Metric, Note, Panel, StateTag } from "./primitives";
 
 const LIFECYCLE: AuthoritativeLifecycle[] = [
-  "NO_LIQUIDITY", "FORMING", "BUILDING", "MATURE", "EXHAUSTION_WATCH",
-  "EXHAUSTION_CONFIRMED", "DELIVERY", "DELIVERY_ACCELERATING", "ABSORBING",
-  "RELEASE_WATCH", "RELEASE", "RIPE", "CONFIRMED",
+  "NO_LIQUIDITY",
+  "FORMING",
+  "BUILDING",
+  "MATURE",
+  "EXHAUSTION_WATCH",
+  "EXHAUSTION_CONFIRMED",
+  "DELIVERY",
+  "DELIVERY_ACCELERATING",
+  "ABSORBING",
+  "RELEASE_WATCH",
+  "RELEASE",
+  "RIPE",
+  "CONFIRMED",
 ];
 
 function LifecycleTrack({ contract }: { contract: AuthoritativeContract }) {
   const idx = LIFECYCLE.indexOf(contract.state as AuthoritativeLifecycle);
-  return <div><div className="flex gap-0.5">{LIFECYCLE.map((s, i) => <div key={s} className="flex-1"><div className={cn("h-1 rounded-full", idx >= 0 && i <= idx ? "bg-signal" : "bg-muted", idx === i && "bg-accent")} /><span className="mono-label mt-1 block truncate text-[7px]">{s.replaceAll("_", " ").slice(0, 7)}</span></div>)}</div>{["BLOCKED","CONFLICTED","INVALIDATED"].includes(contract.state) && <p className="mono-label mt-1.5 text-conflict">{contract.state}</p>}</div>;
-}
-
-function ContractCard({ c, active, onSelect }: { c: AuthoritativeContract; active: boolean; onSelect: () => void }) {
-  return <button type="button" onClick={onSelect} className={cn("panel flex flex-col gap-2 p-3 text-left transition-colors", active ? "border-signal/60 bg-signal/5" : "hover:border-border-strong")}>
-    <div className="flex items-center justify-between gap-2"><strong className="tabular text-sm">{c.label}</strong><StateTag state={c.state} /></div>
-    <div className="flex items-baseline gap-2"><span className="tabular text-2xl leading-none">{Math.round(c.confirmation)}</span><span className="mono-label">confirmation</span></div>
-    <LifecycleTrack contract={c} />
-    <Meter label="Liquidity level" value={c.liquidityLevel} /><Meter label="Accumulated liquidity" value={c.accumulatedLiquidity} /><Meter label="Maturity" value={c.maturity} /><Meter label="Exhaustion" value={c.exhaustion} tone="caution" /><Meter label="Delivery" value={c.delivery} /><Meter label="Conflict" value={c.conflict} tone="conflict" />
-  </button>;
-}
-
-export function LiquidityView({ a, selectedContract, onSelectContract }: { a: AuthoritativeMarketAnalysis; selectedContract: string; onSelectContract: (id: string) => void }) {
-  const focus = a.contracts.find(c => c.id === selectedContract) ?? a.top;
-  return <div className="flex flex-col gap-3">
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{a.contracts.map(c => <ContractCard key={c.id} c={c} active={c.id === focus.id} onSelect={() => onSelectContract(c.id)} />)}</div>
-    <div className="grid gap-3 lg:grid-cols-3">
-      <Panel title="Authoritative liquidity decision" subtitle="V4 Sentinel + reservoir intelligence · production contract boundary" className="lg:col-span-2">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md bg-surface-raised px-3 py-2"><div><div className="mono-label">Focus contract</div><strong className="tabular text-lg">{focus.label}</strong><div className="mt-1 flex gap-2"><StateTag state={focus.state} /><span className="mono-label">{focus.qualified ? "QUALIFIED" : focus.qualificationStatus}</span></div></div><div className="text-right"><div className="tabular text-3xl leading-none">{Math.round(focus.confirmation)}</div><span className="mono-label">confirmation</span></div></div>
-        <div className="grid gap-3 md:grid-cols-2"><div>{focus.reservoirs.length ? <div className="mb-3 flex flex-wrap gap-1">{focus.reservoirs.map(r => <span key={`${r.digit}-${r.kind}`} className="rounded border border-calm/30 bg-calm/10 px-1.5 py-0.5 text-[10px] text-calm">d{r.digit} · {r.kind} · {Math.round(r.score)}</span>)}</div> : <Note>No qualifying reservoir detected. High liquidity level does not imply accumulated liquidity.</Note>}<div className="grid grid-cols-2 gap-x-3"><Metric label="Age" value={focus.age} suffix="ticks" /><Metric label="Accumulated" value={focus.accumulatedLiquidity} /><Metric label="Reservoir score" value={focus.reservoirScore} /><Metric label="Liquidity level" value={focus.liquidityLevel} /></div>{focus.evidence.length > 0 && <div className="mt-2 flex flex-wrap gap-1">{focus.evidence.map((e,i)=><span key={i} className="rounded border border-calm/30 bg-calm/10 px-1.5 py-0.5 text-[10px] text-calm">{e}</span>)}</div>}{focus.vetoes.length > 0 && <div className="mt-2 flex flex-wrap gap-1">{focus.vetoes.map((v,i)=><span key={i} className="rounded border border-danger/30 bg-danger/10 px-1.5 py-0.5 text-[10px] text-danger">Veto: {v}</span>)}</div>}</div><div><Meter label="Maturity" value={focus.maturity} /><Meter label="Exhaustion" value={focus.exhaustion} tone="caution" /><Meter label="Delivery" value={focus.delivery} /><Meter label="Absorption" value={focus.absorption} tone="calm" /><Meter label="Release" value={focus.release} /><Meter label="Conflict" value={focus.conflict} tone="conflict" /></div></div>
-      </Panel>
-      <Panel title="Production gates" subtitle="Mandatory vetting before qualification"><Metric label="Age ≥ 12" value={focus.age} suffix="ticks" tone={focus.age >= 12 ? "calm" : "caution"}/><Metric label="Accumulated ≥ 65" value={focus.accumulatedLiquidity} tone={focus.accumulatedLiquidity >= 65 ? "calm" : "caution"}/><Metric label="Maturity ≥ 62" value={focus.maturity} tone={focus.maturity >= 62 ? "calm" : "caution"}/><Metric label="Exhaustion ≥ 65" value={focus.exhaustion} tone={focus.exhaustion >= 65 ? "calm" : "caution"}/><Metric label="Delivery ≥ 62" value={focus.delivery} tone={focus.delivery >= 62 ? "calm" : "caution"}/><Metric label="Conflict < 60" value={focus.conflict} tone={focus.conflict < 60 ? "calm" : "danger"}/><Note>All gates and Sentinel vetoes must pass. Ranking may still show NOT QUALIFIED.</Note></Panel>
+  return (
+    <div>
+      <div className="flex gap-0.5">
+        {LIFECYCLE.map((s, i) => (
+          <div key={s} className="flex-1">
+            <div
+              className={cn(
+                "h-1 rounded-full",
+                idx >= 0 && i <= idx ? "bg-signal" : "bg-muted",
+                idx === i && "bg-accent",
+              )}
+            />
+            <span className="mono-label mt-1 block truncate text-[7px]">
+              {s.replaceAll("_", " ").slice(0, 7)}
+            </span>
+          </div>
+        ))}
+      </div>
+      {["BLOCKED", "CONFLICTED", "INVALIDATED"].includes(contract.state) && (
+        <p className="mono-label mt-1.5 text-conflict">{contract.state}</p>
+      )}
     </div>
-  </div>;
+  );
+}
+
+function ContractCard({
+  c,
+  active,
+  onSelect,
+}: {
+  c: AuthoritativeContract;
+  active: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={cn(
+        "panel flex flex-col gap-2 p-3 text-left transition-colors",
+        active ? "border-signal/60 bg-signal/5" : "hover:border-border-strong",
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <strong className="tabular text-sm">{c.label}</strong>
+        <StateTag state={c.state} />
+      </div>
+      <div className="flex items-baseline gap-2">
+        <span className="tabular text-2xl leading-none">{Math.round(c.confirmation)}</span>
+        <span className="mono-label">confirmation</span>
+      </div>
+      <LifecycleTrack contract={c} />
+      <Meter label="Liquidity level" value={c.liquidityLevel} />
+      <Meter label="Accumulated liquidity" value={c.accumulatedLiquidity} />
+      <Meter label="Maturity" value={c.maturity} />
+      <Meter label="Exhaustion" value={c.exhaustion} tone="caution" />
+      <Meter label="Delivery" value={c.delivery} />
+      <Meter label="Conflict" value={c.conflict} tone="conflict" />
+    </button>
+  );
+}
+
+export function LiquidityView({
+  a,
+  selectedContract,
+  onSelectContract,
+}: {
+  a: AuthoritativeMarketAnalysis;
+  selectedContract: string;
+  onSelectContract: (id: string) => void;
+}) {
+  const focus = a.contracts.find((c) => c.id === selectedContract) ?? a.top;
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {a.contracts.map((c) => (
+          <ContractCard
+            key={c.id}
+            c={c}
+            active={c.id === focus.id}
+            onSelect={() => onSelectContract(c.id)}
+          />
+        ))}
+      </div>
+      <div className="grid gap-3 lg:grid-cols-3">
+        <Panel
+          title="Authoritative liquidity decision"
+          subtitle="V4 Sentinel + reservoir intelligence · production contract boundary"
+          className="lg:col-span-2"
+        >
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md bg-surface-raised px-3 py-2">
+            <div>
+              <div className="mono-label">Focus contract</div>
+              <strong className="tabular text-lg">{focus.label}</strong>
+              <div className="mt-1 flex gap-2">
+                <StateTag state={focus.state} />
+                <span className="mono-label">
+                  {focus.qualified ? "QUALIFIED" : focus.qualificationStatus}
+                </span>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="tabular text-3xl leading-none">{Math.round(focus.confirmation)}</div>
+              <span className="mono-label">confirmation</span>
+            </div>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              {focus.reservoirs.length ? (
+                <div className="mb-3 flex flex-wrap gap-1">
+                  {focus.reservoirs.map((r) => (
+                    <span
+                      key={`${r.digit}-${r.kind}`}
+                      className="rounded border border-calm/30 bg-calm/10 px-1.5 py-0.5 text-[10px] text-calm"
+                    >
+                      d{r.digit} · {r.kind} · {Math.round(r.score)}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <Note>
+                  No qualifying reservoir detected. High liquidity level does not imply accumulated
+                  liquidity.
+                </Note>
+              )}
+              <div className="grid grid-cols-2 gap-x-3">
+                <Metric label="Age" value={focus.age} suffix="ticks" />
+                <Metric label="Accumulated" value={focus.accumulatedLiquidity} />
+                <Metric label="Reservoir score" value={focus.reservoirScore} />
+                <Metric label="Liquidity level" value={focus.liquidityLevel} />
+              </div>
+              {focus.evidence.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {focus.evidence.map((e, i) => (
+                    <span
+                      key={i}
+                      className="rounded border border-calm/30 bg-calm/10 px-1.5 py-0.5 text-[10px] text-calm"
+                    >
+                      {e}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {focus.vetoes.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {focus.vetoes.map((v, i) => (
+                    <span
+                      key={i}
+                      className="rounded border border-danger/30 bg-danger/10 px-1.5 py-0.5 text-[10px] text-danger"
+                    >
+                      Veto: {v}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <Meter label="Maturity" value={focus.maturity} />
+              <Meter label="Exhaustion" value={focus.exhaustion} tone="caution" />
+              <Meter label="Delivery" value={focus.delivery} />
+              <Meter label="Absorption" value={focus.absorption} tone="calm" />
+              <Meter label="Release" value={focus.release} />
+              <Meter label="Conflict" value={focus.conflict} tone="conflict" />
+            </div>
+          </div>
+        </Panel>
+        <Panel title="Production gates" subtitle="Mandatory vetting before qualification">
+          <Metric
+            label="Age ≥ 12"
+            value={focus.age}
+            suffix="ticks"
+            tone={focus.age >= 12 ? "calm" : "caution"}
+          />
+          <Metric
+            label="Accumulated ≥ 65"
+            value={focus.accumulatedLiquidity}
+            tone={focus.accumulatedLiquidity >= 65 ? "calm" : "caution"}
+          />
+          <Metric
+            label="Maturity ≥ 62"
+            value={focus.maturity}
+            tone={focus.maturity >= 62 ? "calm" : "caution"}
+          />
+          <Metric
+            label="Exhaustion ≥ 65"
+            value={focus.exhaustion}
+            tone={focus.exhaustion >= 65 ? "calm" : "caution"}
+          />
+          <Metric
+            label="Delivery ≥ 62"
+            value={focus.delivery}
+            tone={focus.delivery >= 62 ? "calm" : "caution"}
+          />
+          <Metric
+            label="Conflict < 60"
+            value={focus.conflict}
+            tone={focus.conflict < 60 ? "calm" : "danger"}
+          />
+          <Note>
+            All gates and Sentinel vetoes must pass. Ranking may still show NOT QUALIFIED.
+          </Note>
+        </Panel>
+      </div>
+    </div>
+  );
 }
 
 export function PsychologyView({ a }: { a: AuthoritativeMarketAnalysis }) {
-  const p = a.sentinelPsychology; const pct = p.pct ?? []; const pressure = p.pressure ?? [];
-  const role = (d:number) => d===p.green?"GREEN":d===p.secondGreen?"2ND GREEN":d===p.red?"RED":d===p.secondRed?"2ND RED":d===p.purple?"PURPLE":"";
-  return <div className="grid gap-3 lg:grid-cols-2"><Panel title="Authoritative 1000-Tick Sentinel Psychology" subtitle={`${p.sampleSize ?? 1000} ticks · production psychology anchor`} className="lg:col-span-2"><div className="grid grid-cols-2 gap-2 sm:grid-cols-5">{[["Green",p.green],["2nd Green",p.secondGreen],["Red",p.red],["2nd Red",p.secondRed],["Purple",p.purple]].map(([label,d])=><div key={String(label)} className="rounded-md border border-border bg-surface-raised p-2.5"><span className="mono-label">{label}</span><div className="tabular mt-1 text-2xl font-bold">{d===null?"—":`d${d}`}</div><span className="tabular text-xs text-muted-foreground">{d===null?"":`${((pct[d as number]??0)*100).toFixed(1)}%`}</span></div>)}</div>{p.reasons?.length?<div className="mt-3 rounded border border-border/70 bg-surface-raised/60 p-2.5"><div className="mono-label mb-1">Sentinel Rule Evaluation</div><ul className="space-y-1 text-[11px] text-muted-foreground">{p.reasons.map((r,i)=><li key={i}>• {r}</li>)}</ul></div>:null}</Panel><Panel title="10-digit Sentinel distribution" subtitle="1000-tick baseline with pressure"><div className="grid grid-cols-5 gap-1.5 sm:grid-cols-10">{Array.from({length:10},(_,d)=><div key={d} className="rounded border border-border bg-surface-raised p-1 text-center"><b className="tabular text-sm">{d}</b><div className="tabular text-[10px]">{((pct[d]??0)*100).toFixed(1)}%</div><div className="tabular text-[9px] text-muted-foreground">{(pressure[d]??0).toFixed(1)}</div><span className="mono-label text-[7px]">{role(d)}</span></div>)}</div><Note>1000-tick Sentinel remains the psychology anchor; reservoir detection is broader than Red/2nd Red/Purple.</Note></Panel><Panel title="Contract psychology" subtitle="Winning-side role consistency">{a.contracts.map(c=><div key={c.id} className="mb-2 last:mb-0"><div className="flex justify-between"><span className="tabular text-xs">{c.label}</span><StateTag state={c.state}/></div><div className="mt-1 grid grid-cols-5 gap-1 text-center text-[9px]"><span>G {c.psychology.green}</span><span>2G {c.psychology.secondGreen}</span><span>R {c.psychology.red}</span><span>2R {c.psychology.secondRed}</span><span>P {c.psychology.purple??"—"}</span></div></div>)}</Panel></div>;
+  const p = a.sentinelPsychology;
+  const pct = p.pct ?? [];
+  const pressure = p.pressure ?? [];
+  const role = (d: number) =>
+    d === p.green
+      ? "GREEN"
+      : d === p.secondGreen
+        ? "2ND GREEN"
+        : d === p.red
+          ? "RED"
+          : d === p.secondRed
+            ? "2ND RED"
+            : d === p.purple
+              ? "PURPLE"
+              : "";
+  return (
+    <div className="grid gap-3 lg:grid-cols-2">
+      <Panel
+        title="Authoritative 1000-Tick Sentinel Psychology"
+        subtitle={`${p.sampleSize ?? 1000} ticks · production psychology anchor`}
+        className="lg:col-span-2"
+      >
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+          {[
+            ["Green", p.green],
+            ["2nd Green", p.secondGreen],
+            ["Red", p.red],
+            ["2nd Red", p.secondRed],
+            ["Purple", p.purple],
+          ].map(([label, d]) => (
+            <div
+              key={String(label)}
+              className="rounded-md border border-border bg-surface-raised p-2.5"
+            >
+              <span className="mono-label">{label}</span>
+              <div className="tabular mt-1 text-2xl font-bold">{d === null ? "—" : `d${d}`}</div>
+              <span className="tabular text-xs text-muted-foreground">
+                {d === null ? "" : `${((pct[d as number] ?? 0) * 100).toFixed(1)}%`}
+              </span>
+            </div>
+          ))}
+        </div>
+        {p.reasons?.length ? (
+          <div className="mt-3 rounded border border-border/70 bg-surface-raised/60 p-2.5">
+            <div className="mono-label mb-1">Sentinel Rule Evaluation</div>
+            <ul className="space-y-1 text-[11px] text-muted-foreground">
+              {p.reasons.map((r, i) => (
+                <li key={i}>• {r}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </Panel>
+      <Panel title="10-digit Sentinel distribution" subtitle="1000-tick baseline with pressure">
+        <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-10">
+          {Array.from({ length: 10 }, (_, d) => (
+            <div key={d} className="rounded border border-border bg-surface-raised p-1 text-center">
+              <b className="tabular text-sm">{d}</b>
+              <div className="tabular text-[10px]">{((pct[d] ?? 0) * 100).toFixed(1)}%</div>
+              <div className="tabular text-[9px] text-muted-foreground">
+                {(pressure[d] ?? 0).toFixed(1)}
+              </div>
+              <span className="mono-label text-[7px]">{role(d)}</span>
+            </div>
+          ))}
+        </div>
+        <Note>
+          1000-tick Sentinel remains the psychology anchor; reservoir detection is broader than
+          Red/2nd Red/Purple.
+        </Note>
+      </Panel>
+      <Panel title="Contract psychology" subtitle="Winning-side role consistency">
+        {a.contracts.map((c) => (
+          <div key={c.id} className="mb-2 last:mb-0">
+            <div className="flex justify-between">
+              <span className="tabular text-xs">{c.label}</span>
+              <StateTag state={c.state} />
+            </div>
+            <div className="mt-1 grid grid-cols-5 gap-1 text-center text-[9px]">
+              <span>G {c.psychology.green}</span>
+              <span>2G {c.psychology.secondGreen}</span>
+              <span>R {c.psychology.red}</span>
+              <span>2R {c.psychology.secondRed}</span>
+              <span>P {c.psychology.purple ?? "—"}</span>
+            </div>
+          </div>
+        ))}
+      </Panel>
+    </div>
+  );
 }
 
-export function DangerView({ a }: { a: AuthoritativeMarketAnalysis }) { return <div className="grid gap-3 lg:grid-cols-3"><Panel title="Contract-specific danger" subtitle="Authoritative contract state" className="lg:col-span-2"><div className="overflow-x-auto"><table className="w-full min-w-[620px] text-xs"><thead><tr className="mono-label border-b border-border"><th className="py-1 text-left">Contract</th><th className="py-1 text-right">Danger</th><th className="py-1 text-right">Conflict</th><th className="py-1 text-right">Exhaust</th><th className="py-1 text-right">Delivery</th><th className="py-1 text-right">Confirm</th><th className="py-1 text-left">State</th></tr></thead><tbody className="tabular">{a.contracts.map(c=><tr key={c.id} className="border-b border-border/50"><td className="py-1">{c.label}</td><td className={cn("py-1 text-right",c.danger>70&&"text-danger")}>{Math.round(c.danger)}</td><td className={cn("py-1 text-right",c.conflict>=60&&"text-danger")}>{Math.round(c.conflict)}</td><td className="py-1 text-right">{Math.round(c.exhaustion)}</td><td className="py-1 text-right">{Math.round(c.delivery)}</td><td className="py-1 text-right">{Math.round(c.confirmation)}</td><td className="py-1"><StateTag state={c.state}/></td></tr>)}</tbody></table></div></Panel><Panel title="Veto and risk ledger" subtitle="Why a contract is blocked or not qualified">{a.contracts.map(c=><div key={c.id} className="mb-3 last:mb-0"><div className="flex justify-between"><b>{c.label}</b><span className="tabular">{c.qualified?"QUALIFIED":"VETTING"}</span></div>{c.vetoes.length?<ul className="mt-1 space-y-1 text-[10px] text-danger">{c.vetoes.map((v,i)=><li key={i}>• {v}</li>)}</ul>:<span className="mono-label text-calm">No recorded veto</span>}</div>)}</Panel></div>; }
+export function DangerView({ a }: { a: AuthoritativeMarketAnalysis }) {
+  return (
+    <div className="grid gap-3 lg:grid-cols-3">
+      <Panel
+        title="Contract-specific danger"
+        subtitle="Authoritative contract state"
+        className="lg:col-span-2"
+      >
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[620px] text-xs">
+            <thead>
+              <tr className="mono-label border-b border-border">
+                <th className="py-1 text-left">Contract</th>
+                <th className="py-1 text-right">Danger</th>
+                <th className="py-1 text-right">Conflict</th>
+                <th className="py-1 text-right">Exhaust</th>
+                <th className="py-1 text-right">Delivery</th>
+                <th className="py-1 text-right">Confirm</th>
+                <th className="py-1 text-left">State</th>
+              </tr>
+            </thead>
+            <tbody className="tabular">
+              {a.contracts.map((c) => (
+                <tr key={c.id} className="border-b border-border/50">
+                  <td className="py-1">{c.label}</td>
+                  <td className={cn("py-1 text-right", c.danger > 70 && "text-danger")}>
+                    {Math.round(c.danger)}
+                  </td>
+                  <td className={cn("py-1 text-right", c.conflict >= 60 && "text-danger")}>
+                    {Math.round(c.conflict)}
+                  </td>
+                  <td className="py-1 text-right">{Math.round(c.exhaustion)}</td>
+                  <td className="py-1 text-right">{Math.round(c.delivery)}</td>
+                  <td className="py-1 text-right">{Math.round(c.confirmation)}</td>
+                  <td className="py-1">
+                    <StateTag state={c.state} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+      <Panel title="Veto and risk ledger" subtitle="Why a contract is blocked or not qualified">
+        {a.contracts.map((c) => (
+          <div key={c.id} className="mb-3 last:mb-0">
+            <div className="flex justify-between">
+              <b>{c.label}</b>
+              <span className="tabular">{c.qualified ? "QUALIFIED" : "VETTING"}</span>
+            </div>
+            {c.vetoes.length ? (
+              <ul className="mt-1 space-y-1 text-[10px] text-danger">
+                {c.vetoes.map((v, i) => (
+                  <li key={i}>• {v}</li>
+                ))}
+              </ul>
+            ) : (
+              <span className="mono-label text-calm">No recorded veto</span>
+            )}
+          </div>
+        ))}
+      </Panel>
+    </div>
+  );
+}
 
-export function MatrixView({ markets, onSelect }: { markets: ComputedMarket[]; onSelect: (symbol:string)=>void }) { const ids=markets.find(m=>m.authoritative?.contracts.length)?.authoritative?.contracts.map(c=>c.id)??[]; return <Panel title="15 × contract intelligence matrix" subtitle="Authoritative confirmation and lifecycle state across the live universe"><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-xs"><thead><tr className="mono-label border-b border-border"><th className="py-1 text-left">Market</th>{ids.map(id=><th key={id} className="py-1 text-right">{id}</th>)}<th className="py-1 text-left">Top</th></tr></thead><tbody className="tabular">{markets.map(m=>{const a=m.authoritative;return <tr key={m.symbol} onClick={()=>onSelect(m.symbol)} className="cursor-pointer border-b border-border/50 hover:bg-surface-raised"><td className="py-1 whitespace-nowrap">{m.name}</td>{ids.map(id=>{const c=a?.contracts.find(x=>x.id===id);return <td key={id} className={cn("py-1 text-right",c?.qualified&&"text-state-confirmed",c?.state==="CONFLICTED"&&"text-state-conflicted",c?.state==="BLOCKED"&&"text-state-blocked")}>{c?Math.round(c.confirmation):"—"}</td>})}<td className="py-1">{a?<StateTag state={a.top.state}/>:<StateTag state="WAITING"/>}</td></tr>})}</tbody></table></div></Panel>; }
+export function MatrixView({
+  markets,
+  onSelect,
+}: {
+  markets: ComputedMarket[];
+  onSelect: (symbol: string) => void;
+}) {
+  const ids =
+    markets
+      .find((m) => m.authoritative?.contracts.length)
+      ?.authoritative?.contracts.map((c) => c.id) ?? [];
+  return (
+    <Panel
+      title="15 × contract intelligence matrix"
+      subtitle="Authoritative confirmation and lifecycle state across the live universe"
+    >
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[760px] text-xs">
+          <thead>
+            <tr className="mono-label border-b border-border">
+              <th className="py-1 text-left">Market</th>
+              {ids.map((id) => (
+                <th key={id} className="py-1 text-right">
+                  {id}
+                </th>
+              ))}
+              <th className="py-1 text-left">Top</th>
+            </tr>
+          </thead>
+          <tbody className="tabular">
+            {markets.map((m) => {
+              const a = m.authoritative;
+              return (
+                <tr
+                  key={m.symbol}
+                  onClick={() => onSelect(m.symbol)}
+                  className="cursor-pointer border-b border-border/50 hover:bg-surface-raised"
+                >
+                  <td className="py-1 whitespace-nowrap">{m.name}</td>
+                  {ids.map((id) => {
+                    const c = a?.contracts.find((x) => x.id === id);
+                    return (
+                      <td
+                        key={id}
+                        className={cn(
+                          "py-1 text-right",
+                          c?.qualified && "text-state-confirmed",
+                          c?.state === "CONFLICTED" && "text-state-conflicted",
+                          c?.state === "BLOCKED" && "text-state-blocked",
+                        )}
+                      >
+                        {c ? Math.round(c.confirmation) : "—"}
+                      </td>
+                    );
+                  })}
+                  <td className="py-1">
+                    {a ? <StateTag state={a.top.state} /> : <StateTag state="WAITING" />}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  );
+}
 
-export function ResearchView({ a, observations, onRecord, onClear, onExport }: { a: AuthoritativeMarketAnalysis; observations: Observation[]; onRecord:()=>void; onClear:()=>void; onExport:()=>void }) { return <div className="flex flex-col gap-3"><div className="grid gap-3 lg:grid-cols-3"><Panel title="Authoritative research state"><Metric label="Sample" value={a.sample} suffix="ticks"/><Metric label="Cumulative ticks" value={a.tickCount}/><Metric label="Top confirmation" value={a.top.confirmation}/><Metric label="Top age" value={a.top.age} suffix="ticks"/><Metric label="Top accumulated" value={a.top.accumulatedLiquidity}/><Metric label="Top reservoirs" value={a.top.reservoirDigits.length}/></Panel><Panel title="Formation / lifecycle" className="lg:col-span-2"><LifecycleTrack contract={a.top}/><div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4"><Metric label="Maturity" value={a.top.maturity}/><Metric label="Exhaustion" value={a.top.exhaustion}/><Metric label="Delivery" value={a.top.delivery}/><Metric label="Release" value={a.top.release}/></div><Note>{LIQUIDITY_LAWS.join(" · ")} · model {ANALYSIS_VERSION}</Note></Panel></div><Panel title="Observation journal" subtitle="Local research records; never fed back into production intelligence"><div className="mb-2 flex gap-2"><button type="button" onClick={onRecord} className="rounded border border-border px-2 py-1 text-xs hover:border-signal">Record observation</button><button type="button" onClick={onExport} className="rounded border border-border px-2 py-1 text-xs hover:border-signal">Export CSV</button><button type="button" onClick={onClear} className="rounded border border-border px-2 py-1 text-xs hover:border-danger">Clear</button></div><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-[10px]"><thead><tr className="mono-label border-b border-border"><th className="py-1 text-left">Time</th><th className="py-1 text-left">Contract</th><th className="py-1">State</th><th className="py-1">Confirm</th><th className="py-1">Maturity</th><th className="py-1">Danger</th><th className="py-1">Note</th></tr></thead><tbody className="tabular">{observations.map(o=><tr key={o.id} className="border-b border-border/40"><td className="py-1">{new Date(o.createdAt).toLocaleTimeString()}</td><td className="py-1">{o.contract}</td><td className="py-1">{o.state}</td><td className="py-1 text-right">{o.confirmation}</td><td className="py-1 text-right">{o.maturity}</td><td className="py-1 text-right">{o.danger}</td><td className="py-1">{o.note}</td></tr>)}</tbody></table></div></Panel></div>; }
+export function ResearchView({
+  a,
+  observations,
+  onRecord,
+  onClear,
+  onExport,
+}: {
+  a: AuthoritativeMarketAnalysis;
+  observations: Observation[];
+  onRecord: () => void;
+  onClear: () => void;
+  onExport: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="grid gap-3 lg:grid-cols-3">
+        <Panel title="Authoritative research state">
+          <Metric label="Sample" value={a.sample} suffix="ticks" />
+          <Metric label="Cumulative ticks" value={a.tickCount} />
+          <Metric label="Top confirmation" value={a.top.confirmation} />
+          <Metric label="Top age" value={a.top.age} suffix="ticks" />
+          <Metric label="Top accumulated" value={a.top.accumulatedLiquidity} />
+          <Metric label="Top reservoirs" value={a.top.reservoirDigits.length} />
+        </Panel>
+        <Panel title="Formation / lifecycle" className="lg:col-span-2">
+          <LifecycleTrack contract={a.top} />
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <Metric label="Maturity" value={a.top.maturity} />
+            <Metric label="Exhaustion" value={a.top.exhaustion} />
+            <Metric label="Delivery" value={a.top.delivery} />
+            <Metric label="Release" value={a.top.release} />
+          </div>
+          <Note>
+            {LIQUIDITY_LAWS.join(" · ")} · model {ANALYSIS_VERSION}
+          </Note>
+        </Panel>
+      </div>
+      <Panel
+        title="Observation journal"
+        subtitle="Local research records; never fed back into production intelligence"
+      >
+        <div className="mb-2 flex gap-2">
+          <button
+            type="button"
+            onClick={onRecord}
+            className="rounded border border-border px-2 py-1 text-xs hover:border-signal"
+          >
+            Record observation
+          </button>
+          <button
+            type="button"
+            onClick={onExport}
+            className="rounded border border-border px-2 py-1 text-xs hover:border-signal"
+          >
+            Export CSV
+          </button>
+          <button
+            type="button"
+            onClick={onClear}
+            className="rounded border border-border px-2 py-1 text-xs hover:border-danger"
+          >
+            Clear
+          </button>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-[10px]">
+            <thead>
+              <tr className="mono-label border-b border-border">
+                <th className="py-1 text-left">Time</th>
+                <th className="py-1 text-left">Contract</th>
+                <th className="py-1">State</th>
+                <th className="py-1">Confirm</th>
+                <th className="py-1">Maturity</th>
+                <th className="py-1">Danger</th>
+                <th className="py-1">Note</th>
+              </tr>
+            </thead>
+            <tbody className="tabular">
+              {observations.map((o) => (
+                <tr key={o.id} className="border-b border-border/40">
+                  <td className="py-1">{new Date(o.createdAt).toLocaleTimeString()}</td>
+                  <td className="py-1">{o.contract}</td>
+                  <td className="py-1">{o.state}</td>
+                  <td className="py-1 text-right">{o.confirmation}</td>
+                  <td className="py-1 text-right">{o.maturity}</td>
+                  <td className="py-1 text-right">{o.danger}</td>
+                  <td className="py-1">{o.note}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </div>
+  );
+}
