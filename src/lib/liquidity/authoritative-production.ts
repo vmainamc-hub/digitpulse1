@@ -51,9 +51,10 @@ function lifecycleIndex(state?: string): number {
 function strictLifecycle(
   contract: AuthoritativeContract,
   previous: AuthoritativeContract | undefined,
+  psychologyBlocked: boolean,
 ): AuthoritativeLifecycle {
-  if (contract.qualificationStatus === "BLOCKED") return "BLOCKED";
-  if (contract.qualificationStatus === "CONFLICTED") return "CONFLICTED";
+  if (psychologyBlocked) return "BLOCKED";
+  if (contract.conflict >= STRICT.conflictMaxExclusive) return "CONFLICTED";
   if (contract.reservoirs.length === 0) return "NO_LIQUIDITY";
 
   let target: AuthoritativeLifecycle = "FORMING";
@@ -84,15 +85,9 @@ function strictLifecycle(
   const previousIndex = lifecycleIndex(previous?.state);
   const targetIndex = lifecycleIndex(target);
 
-  // A formation may advance by at most one production stage per newly observed
-  // tick window. This prevents a strong metric snapshot from jumping straight
-  // from FORMING/BUILDING to RELEASE/CONFIRMED.
   if (previousIndex >= 0 && targetIndex > previousIndex + 1) {
     return LIFECYCLE_ORDER[previousIndex + 1];
   }
-
-  // Never move backwards merely because one analysis cycle is noisy. Explicit
-  // conflict/block/no-liquidity states above are allowed to interrupt the track.
   if (previousIndex >= 0 && targetIndex < previousIndex && contract.confirmation >= 50) {
     return LIFECYCLE_ORDER[previousIndex];
   }
@@ -110,17 +105,15 @@ function strictify(
   const deltaTicks = previous ? Math.max(0, safeTickCount - previousTickCount) : 0;
   const age = previous ? previous.age + deltaTicks : 1;
 
-  // V4's raw target is retained as evidence, but accumulation is advanced using
-  // the feed's cumulative tick counter rather than the capped 1000-tick history length.
   let accumulatedLiquidity = 0;
   if (contract.reservoirs.length > 0) {
     const rawTarget = clamp(
       contract.reservoirScore * 0.45 +
         contract.delivery * 0.25 +
-        contract.reservoirs.reduce((sum, r) => sum + r.persistence, 0) /
-          contract.reservoirs.length * 0.2 +
-        contract.reservoirs.reduce((sum, r) => sum + r.coherence, 0) /
-          contract.reservoirs.length * 0.1,
+        (contract.reservoirs.reduce((sum, r) => sum + r.persistence, 0) /
+          contract.reservoirs.length) * 0.2 +
+        (contract.reservoirs.reduce((sum, r) => sum + r.coherence, 0) /
+          contract.reservoirs.length) * 0.1,
     );
     const previousAccum = previous?.accumulatedLiquidity ?? 0;
     if (previousAccum === 0) {
@@ -132,8 +125,11 @@ function strictify(
     }
   }
 
-  const passesPsychology = contract.psychology !== undefined &&
-    !contract.vetoes.some((v) => /psychology|sentinel/i.test(v));
+  // V4 exposes Sentinel reasons but does not expose the boolean psychology outcome.
+  // Its BLOCKED status is the authoritative indication of a hard psychology reject.
+  const psychologyBlocked = contract.qualificationStatus === "BLOCKED";
+  const psychologyVetoes = contract.vetoes.some((v) => /psychology|sentinel/i.test(v));
+  const passesPsychology = !psychologyBlocked && !psychologyVetoes;
   const passesAge = age >= STRICT.age;
   const passesAccumulation = accumulatedLiquidity >= STRICT.accumulatedLiquidity;
   const passesMaturity = contract.maturity >= STRICT.maturity;
@@ -141,8 +137,6 @@ function strictify(
   const passesDelivery = contract.delivery >= STRICT.delivery;
   const passesConflict = contract.conflict < STRICT.conflictMaxExclusive;
 
-  // Preserve genuine Sentinel/model vetoes while removing only the old V4 adapter
-  // threshold messages that are superseded by the production gates above.
   const vetoes = contract.vetoes.filter(
     (v) =>
       !/Insufficient formation age|Insufficient accumulated liquidity|Elevated structural conflict/i.test(v),
@@ -151,7 +145,7 @@ function strictify(
   if (!passesAccumulation) {
     vetoes.push(`Insufficient accumulated liquidity (${Math.round(accumulatedLiquidity)}/${STRICT.accumulatedLiquidity})`);
   }
-  if (contract.conflict >= STRICT.conflictMaxExclusive) {
+  if (!passesConflict) {
     vetoes.push(`Elevated structural conflict (${Math.round(contract.conflict)}/${STRICT.conflictMaxExclusive})`);
   }
 
@@ -165,25 +159,25 @@ function strictify(
     passesConflict &&
     vetoes.length === 0;
 
-  const state = strictLifecycle({ ...contract, accumulatedLiquidity, age, vetoes, qualificationStatus: qualified ? "QUALIFIED" : contract.qualificationStatus }, previous);
+  const provisional: AuthoritativeContract = {
+    ...contract,
+    age,
+    accumulatedLiquidity,
+    vetoes: [...new Set(vetoes)],
+    qualified,
+    qualificationStatus: qualified ? "QUALIFIED" : "NOT_QUALIFIED",
+    lastTickCount: safeTickCount,
+    birthTick: previous?.birthTick ?? safeTickCount,
+  };
+  const state = strictLifecycle(provisional, previous, psychologyBlocked);
 
   let qualificationStatus: AuthoritativeContract["qualificationStatus"] = "NOT_QUALIFIED";
   if (qualified) qualificationStatus = "QUALIFIED";
   else if (state === "BLOCKED") qualificationStatus = "BLOCKED";
   else if (state === "CONFLICTED") qualificationStatus = "CONFLICTED";
-  else if (contract.psychology && contract.vetoes.some((v) => /WATCH/i.test(v))) qualificationStatus = "WATCH";
+  else if (psychologyBlocked || psychologyVetoes) qualificationStatus = "WATCH";
 
-  return {
-    ...contract,
-    state,
-    age,
-    accumulatedLiquidity,
-    vetoes: [...new Set(vetoes)],
-    qualified,
-    qualificationStatus,
-    lastTickCount: safeTickCount,
-    birthTick: previous?.birthTick ?? safeTickCount,
-  };
+  return { ...provisional, state, qualificationStatus };
 }
 
 export function analyzeAuthoritativeProductionMarket(
