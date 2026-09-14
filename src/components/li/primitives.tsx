@@ -89,17 +89,21 @@ export function Meter({
   value,
   tone = "signal",
   suffix,
+  hint,
 }: {
   label: string;
   value: number;
   tone?: Tone;
   suffix?: string;
+  hint?: string;
 }) {
   const v = Math.max(0, Math.min(100, value || 0));
   return (
     <div className="mb-1.5 last:mb-0">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="mono-label">{label}</span>
+        <span className="mono-label" title={hint}>
+          {label}
+        </span>
         <span className="tabular text-xs text-foreground">
           {Math.round(value || 0)}
           {suffix}
