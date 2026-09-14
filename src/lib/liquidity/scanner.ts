@@ -1,24 +1,31 @@
 /**
- * BEST LIQUIDITY SCAN + SMART 1-MINUTE OVERRIDE ENGINE
+ * BEST LIQUIDITY SCAN + FORMATION MEMORY + TRAJECTORY + SMART OVERRIDE ENGINE
  *
- * Layer 3: Decision & Selection Layer over Persistent Formations (Layer B).
+ * Layer 3: Authoritative Decision & Selection Layer over Persistent Formations (Layer B).
  *
  * Core Architecture & Constraints:
- * 1. The user physically controls when to perform a Scan.
- * 2. Scans rank persistent LiquidityZone formations, NOT raw latest ticks or reactive market cards.
- * 3. Hard qualification gates run BEFORE ranking — invalid Sentinel psychology, losing-side Red,
- *    severe conflict, or insufficient formation persistence are strictly rejected.
- * 4. 60-second smart cooldown prevents tick-by-tick churn and rapid flapping.
- * 5. Material Superiority Override: A candidate that is MATERIALLY SUPERIOR (passes all hard gates,
- *    has sufficient formation persistence, and exceeds the superiority margin) immediately overrides
- *    the current selection even inside the 60s cooldown.
- * 6. Stable Zone Identity: The selected formation maintains its stable zoneId across live ticks;
- *    if the selected formation becomes invalidated, it is explicitly shown as INVALIDATED.
- * 7. If no formation passes hard qualification, explicitly returns NO QUALIFIED LIQUIDITY FORMATION.
+ * 1. RANK FIRST, QUALIFY SECOND: Every scan displays the #1 ranked liquidity formation
+ *    at that exact moment, even if that formation is not structurally qualified.
+ * 2. STRUCTURAL QUALIFICATION IS SEPARATE: Determines whether #1 or any other formation
+ *    passes hard Sentinel psychology and structural evidence gates to be trade-ready.
+ * 3. FORMATION MEMORY & IDENTITY: Formations have deterministic stable IDs (e.g. R_50-UNDER7-GEN-01).
+ *    Formations maintain their history, evidence timeline, and trajectory across ticks.
+ * 4. DYNAMIC RANKING EXPLANATION ("WHY #1"): Authoritatively explains why #1 earned top rank,
+ *    and provides direct structural comparison against the #2 runner-up.
+ * 5. 60-SECOND SMART COOLDOWN & MATERIAL SUPERIORITY OVERRIDE: Prevents tick-by-tick flapping,
+ *    while immediately overriding if a candidate formation is materially superior (+7.0 pts or confirmed release).
+ * 6. SCAN SNAPSHOTS & HISTORY: Captures an immutable record of each scan event.
  */
 
 import { clamp, mean } from "./math";
-import type { LiquidityZone, ZoneLifecycleState, ZoneRegistry } from "./zones";
+import type {
+  LiquidityZone,
+  ZoneLifecycleState,
+  ZoneRegistry,
+  FormationTimelineEvent,
+  EvidenceSnapshot,
+  FormationTrajectoryData,
+} from "./zones";
 
 export const COOLDOWN_SECONDS = 60;
 export const COOLDOWN_MS = COOLDOWN_SECONDS * 1000;
@@ -61,12 +68,43 @@ export interface ZoneQualificationResult {
   reasons: string[];
 }
 
+export interface FormationExplanation {
+  primaryReasons: string[];
+  runnerUpComparison?: {
+    runnerUpSymbol: string;
+    runnerUpContract: string;
+    runnerUpScore: number;
+    advantages: string[];
+    disadvantages: string[];
+    summary: string;
+  } | null;
+}
+
+export interface ScanSnapshot {
+  id: string;
+  timestamp: number;
+  formattedTime: string;
+  selectedZoneId: string;
+  selectedSymbol: string;
+  selectedContract: string;
+  selectedScore: number;
+  selectedLifecycle: string;
+  selectedQualified: boolean;
+  bestQualifiedSymbol?: string;
+  bestQualifiedContract?: string;
+  bestQualifiedScore?: number;
+  marketCount: number;
+  formationCount: number;
+  rankHoldTimeSeconds: number;
+}
+
 export interface ScanResult {
   zoneId: string;
   market: string;
   symbol: string;
   contract: string;
   contractId: string;
+  generation: number;
   kind: "OVER" | "UNDER";
   barrier: number;
 
@@ -81,6 +119,7 @@ export interface ScanResult {
 
   scannedAt: number;
   formattedTime: string;
+  rankHoldTimeSeconds: number;
 
   // Authoritative metrics derived from engines
   psychologyScore: number;
@@ -93,7 +132,7 @@ export interface ScanResult {
   formationAgeSeconds: number;
 
   reservoirScore: number;
-  reservoirRatio: string; // e.g. "5/6"
+  reservoirRatio: string;
   dominantExhaustion: number;
   deliveryScore: number;
   migrationScore: number;
@@ -103,8 +142,16 @@ export interface ScanResult {
   conflictScore: number;
 
   lifecycleState: ZoneLifecycleState;
-  multiWindowSupport: string; // e.g. "5/6"
+  multiWindowSupport: string;
   trajectory: FormationTrajectory;
+  trajectoryData?: FormationTrajectoryData;
+
+  // Dynamic explanation
+  explanation: FormationExplanation;
+
+  // Formation Memory & Timeline
+  timeline: FormationTimelineEvent[];
+  evidenceHistory: EvidenceSnapshot[];
 
   // Override tracking
   isOverride: boolean;
@@ -138,6 +185,8 @@ export interface ScannerState {
   noQualifiedFound: boolean; // True if no qualified formation exists
   totalScansPerformed: number;
   overrideCount: number;
+  rankHoldTimeSeconds: number;
+  scanHistory: ScanSnapshot[];
   lastOverride: {
     at: number;
     previous: string;
@@ -181,8 +230,13 @@ export function determineTrajectory(z: LiquidityZone): FormationTrajectory {
     return "MATURING";
   }
 
+  if (z.trajectory) {
+    if (z.trajectory.direction === "STRENGTHENING") return "STRENGTHENING";
+    if (z.trajectory.direction === "WEAKENING") return "WEAKENING";
+  }
+
   const hist = z.trajectoryHistory;
-  if (hist.length >= 6) {
+  if (hist && hist.length >= 6) {
     const recent = hist.slice(-3);
     const prior = hist.slice(-6, -3);
     const delta = mean(recent) - mean(prior);
@@ -349,24 +403,21 @@ export function qualifyFormation(z: LiquidityZone): ZoneQualificationResult {
 }
 
 /**
- * Deterministic Composite Formation Score (0 to 100).
+ * Deterministic Composite Formation Ranking Score (0 to 100).
  *
- * Follows the 15 evaluation dimensions specified in Requirement 10:
- * 1. Hard qualification
- * 2. Psychology validity
- * 3. Formation maturity
- * 4. Formation persistence
- * 5. Liquidity strength
- * 6. Reservoir strength
- * 7. Dominant exhaustion
- * 8. Delivery strength
- * 9. Migration/rotation
- * 10. Absorption
- * 11. Release readiness
- * 12. Multi-window agreement
- * 13. Conflict penalty
- * 14. Formation trajectory
- * 15. Overall ranking score
+ * Integrates:
+ * 1. Accumulated Liquidity strength (0.22)
+ * 2. Dominant Exhaustion (0.18)
+ * 3. Delivery strength (0.18)
+ * 4. Reservoir Persistence (0.12)
+ * 5. Migration (0.10)
+ * 6. Absorption (0.08)
+ * 7. Evidence Momentum & Trajectory (-5 to +5 pts)
+ * 8. Observation Persistence (0 to +5 pts)
+ * 9. Formation Age / Maturation (0 to +4 pts)
+ * 10. Multi-window agreement (0 to +8 pts)
+ * 11. Lifecycle bonus
+ * 12. Conflict & Contradiction penalties
  */
 export function calculateFormationRankScore(z: LiquidityZone): number {
   const acc = z.accumulators;
@@ -388,7 +439,17 @@ export function calculateFormationRankScore(z: LiquidityZone): number {
   const multiWinPart = (multiWin.count / multiWin.total) * 8.0;
 
   // Formation persistence bonus (saturates around 120 ticks)
-  const persistenceBonus = Math.min(1, z.ageTicks / 120) * 6.0;
+  const persistenceBonus = Math.min(1, z.ageTicks / 120) * 4.0;
+
+  // Trajectory & evidence momentum contribution
+  const traj = z.trajectory;
+  let momentumBonus = 0;
+  if (traj) {
+    momentumBonus = clamp(traj.evidenceMomentum * 0.15, -4.0, 4.0);
+    if (traj.direction === "STRENGTHENING") momentumBonus += 2.0;
+    else if (traj.direction === "WEAKENING") momentumBonus -= 3.0;
+    else if (traj.direction === "REVERSING") momentumBonus -= 5.0;
+  }
 
   // Psychology contribution
   const psychBonus = psych.valid ? 4.0 : psych.outcome === "WATCH" ? 0 : -4.0;
@@ -431,14 +492,8 @@ export function calculateFormationRankScore(z: LiquidityZone): number {
   }
 
   // Conflict & contradiction penalties
-  const conflictPenalty = acc.conflict * 0.12;
-  const contradictionPenalty = acc.contradiction * 0.1;
-
-  // Trajectory bonus
-  const traj = determineTrajectory(z);
-  let trajBonus = 0;
-  if (traj === "STRENGTHENING" || traj === "RELEASING") trajBonus = 3.0;
-  else if (traj === "WEAKENING" || traj === "INVALIDATING") trajBonus = -4.0;
+  const conflictPenalty = acc.conflict * 0.14;
+  const contradictionPenalty = acc.contradiction * 0.12;
 
   const rawScore =
     liquidityPart +
@@ -450,13 +505,152 @@ export function calculateFormationRankScore(z: LiquidityZone): number {
     releaseBonus +
     multiWinPart +
     persistenceBonus +
+    momentumBonus +
     psychBonus +
-    stateBonus +
-    trajBonus -
+    stateBonus -
     conflictPenalty -
     contradictionPenalty;
 
   return Math.round(clamp(rawScore, 0, 100) * 10) / 10;
+}
+
+/**
+ * Dynamic explanation generator: Explains why the #1 formation became #1,
+ * and provides direct structural comparisons against the runner-up.
+ */
+export function explainFormationRanking(
+  winner: LiquidityZone,
+  runnerUp?: LiquidityZone | null,
+): FormationExplanation {
+  const acc = winner.accumulators;
+  const traj = winner.trajectory;
+  const psych = winner.currentPsychology;
+  const primaryReasons: string[] = [];
+
+  // 1. Reservoir
+  if (acc.reservoirPersistence >= 65) {
+    primaryReasons.push(
+      `Persistent reservoir established (${acc.reservoirPersistence.toFixed(0)}% depth)`,
+    );
+  } else if (acc.reservoirPersistence >= 45) {
+    primaryReasons.push(
+      `Emerging reservoir structure (${acc.reservoirPersistence.toFixed(0)}% depth)`,
+    );
+  }
+
+  // 2. Dominant Exhaustion
+  if (acc.dominantExhaustion >= 68) {
+    primaryReasons.push(
+      `Dominant side exhaustion confirmed (${acc.dominantExhaustion.toFixed(0)}%)`,
+    );
+  } else if (acc.dominantExhaustion >= 52) {
+    primaryReasons.push(`Dominant side weakening observed (${acc.dominantExhaustion.toFixed(0)}%)`);
+  }
+
+  // 3. Delivery
+  if (acc.deliveryAcceleration > 10) {
+    primaryReasons.push(
+      `Delivery accelerating into winning reservoir (+${acc.deliveryAcceleration.toFixed(0)} momentum)`,
+    );
+  } else if (acc.delivery >= 58) {
+    primaryReasons.push(`Active delivery into neglected digits (${acc.delivery.toFixed(0)}%)`);
+  }
+
+  // 4. Migration & Purple
+  if (psych.purple !== null && winner.reservoirDigits.includes(psych.purple)) {
+    primaryReasons.push(`Purple digit d${psych.purple} aligned directly with winning reservoir`);
+  } else if (acc.migration >= 45) {
+    primaryReasons.push(
+      `Markov transition migration elevated above baseline (+${acc.migration.toFixed(0)}%)`,
+    );
+  }
+
+  // 5. Trajectory & Momentum
+  if (traj?.direction === "STRENGTHENING") {
+    primaryReasons.push(
+      `Trajectory STRENGTHENING with +${traj.evidenceMomentum.toFixed(1)} evidence momentum`,
+    );
+  }
+
+  // 6. Persistence & Age
+  if (winner.ageTicks >= 35) {
+    primaryReasons.push(
+      `High formation persistence (${winner.ageTicks} ticks accumulated history)`,
+    );
+  }
+
+  // 7. Low Conflict
+  if (acc.conflict < 25) {
+    primaryReasons.push(`Low internal contradiction (${acc.conflict.toFixed(0)}% conflict)`);
+  }
+
+  // Fallback if sparse
+  if (primaryReasons.length === 0) {
+    primaryReasons.push(
+      `Leading composite evidence score (${calculateFormationRankScore(winner).toFixed(1)} pts)`,
+    );
+    primaryReasons.push(`Sustained multi-window support across analysis telescope`);
+  }
+
+  // Runner-Up Comparison
+  let runnerUpComparison: FormationExplanation["runnerUpComparison"] = null;
+  if (runnerUp) {
+    const winnerScore = calculateFormationRankScore(winner);
+    const runnerScore = calculateFormationRankScore(runnerUp);
+    const advantages: string[] = [];
+    const disadvantages: string[] = [];
+
+    const rAcc = runnerUp.accumulators;
+
+    if (acc.delivery > rAcc.delivery + 3) {
+      advantages.push(`+${(acc.delivery - rAcc.delivery).toFixed(1)} pts stronger delivery`);
+    } else if (rAcc.delivery > acc.delivery + 3) {
+      disadvantages.push(`-${(rAcc.delivery - acc.delivery).toFixed(1)} pts lower delivery`);
+    }
+
+    if (acc.dominantExhaustion > rAcc.dominantExhaustion + 3) {
+      advantages.push(
+        `+${(acc.dominantExhaustion - rAcc.dominantExhaustion).toFixed(1)} pts higher exhaustion`,
+      );
+    } else if (rAcc.dominantExhaustion > acc.dominantExhaustion + 3) {
+      disadvantages.push(
+        `-${(rAcc.dominantExhaustion - acc.dominantExhaustion).toFixed(1)} pts lower exhaustion`,
+      );
+    }
+
+    if (acc.reservoirPersistence > rAcc.reservoirPersistence + 3) {
+      advantages.push(
+        `+${(acc.reservoirPersistence - rAcc.reservoirPersistence).toFixed(1)} pts deeper reservoir`,
+      );
+    }
+
+    if (winner.ageTicks > runnerUp.ageTicks + 15) {
+      advantages.push(`+${winner.ageTicks - runnerUp.ageTicks} ticks longer persistence`);
+    }
+
+    if (rAcc.conflict > acc.conflict + 5) {
+      advantages.push(`-${(rAcc.conflict - acc.conflict).toFixed(1)} pts lower conflict`);
+    }
+
+    if (winner.currentPsychology.valid && !runnerUp.currentPsychology.valid) {
+      advantages.push(`Sentinel psychology VALID (runner-up invalid)`);
+    }
+
+    const diff = (winnerScore - runnerScore).toFixed(1);
+    runnerUpComparison = {
+      runnerUpSymbol: runnerUp.symbol,
+      runnerUpContract: runnerUp.contract,
+      runnerUpScore: runnerScore,
+      advantages,
+      disadvantages,
+      summary: `vs #2 ${runnerUp.symbol} ${runnerUp.contract} (+${diff} pts advantage): ${advantages.join(", ") || "superior composite stability"}`,
+    };
+  }
+
+  return {
+    primaryReasons,
+    runnerUpComparison,
+  };
 }
 
 /**
@@ -466,11 +660,10 @@ export function calculateFormationRankScore(z: LiquidityZone): number {
  * CRITICAL RULE:
  * Ranking answers "What is currently ranked #1?"
  * Qualification answers "Does it pass structural rules?"
- * Therefore, comparison is based purely on formation strength and deterministic tie-breakers.
  * Non-qualified formations are NEVER filtered out or artificially demoted before ranking.
  */
 export function compareLiquidityFormations(a: LiquidityZone, b: LiquidityZone): number {
-  // 1. Composite score comparison (rank by overall strength!)
+  // 1. Composite score comparison (rank by overall strength)
   const aScore = calculateFormationRankScore(a);
   const bScore = calculateFormationRankScore(b);
   const scoreDiff = aScore - bScore;
@@ -503,7 +696,6 @@ export function isMateriallySuperior(
   candidate: LiquidityZone,
   current: LiquidityZone,
 ): SuperiorityEvaluation {
-  // Same zone cannot be superior to itself
   if (candidate.zoneId === current.zoneId) {
     return { isSuperior: false, scoreDelta: 0 };
   }
@@ -530,9 +722,7 @@ export function isMateriallySuperior(
   const candidateScore = calculateFormationRankScore(candidate);
   const scoreDelta = Math.round((candidateScore - currentScore) * 10) / 10;
 
-  // 3. Structural progression override:
-  // If candidate is CONFIRMED or RELEASE and current is still in FORMING/BUILDING,
-  // lower superiority margin to +4.0 points.
+  // 3. Structural progression override
   const isCandidateAdvanced =
     candidate.lifecycleState === "CONFIRMED" || candidate.lifecycleState === "RELEASE";
   const isCurrentEarly =
@@ -563,6 +753,7 @@ export function isMateriallySuperior(
 export function buildScanResult(
   zone: LiquidityZone,
   rank = 1,
+  runnerUp?: LiquidityZone | null,
   overrideMetadata?: {
     isOverride: boolean;
     overrideCount: number;
@@ -571,6 +762,7 @@ export function buildScanResult(
     previousScore?: number;
     overrideReason?: string;
   },
+  rankHoldTimeSeconds = 0,
 ): ScanResult {
   const acc = zone.accumulators;
   const psych = zone.currentPsychology;
@@ -584,9 +776,11 @@ export function buildScanResult(
     acc.conflict < 30 ? "LOW" : acc.conflict < 55 ? "MODERATE" : "HIGH";
 
   const durationTicks = Math.max(1, zone.currentTick - zone.formationStartTick);
+  const explanation = explainFormationRanking(zone, runnerUp);
 
   return {
     zoneId: zone.zoneId,
+    generation: zone.generation ?? 1,
     market: zone.market,
     symbol: zone.symbol,
     contract: zone.contract,
@@ -599,6 +793,7 @@ export function buildScanResult(
     score,
     scannedAt: now,
     formattedTime: formatScanTime(now),
+    rankHoldTimeSeconds,
 
     psychologyScore,
     psychologyValidity: psych.valid ? "VALID" : psych.outcome === "WATCH" ? "WATCH" : "REJECT",
@@ -624,6 +819,11 @@ export function buildScanResult(
     lifecycleState: zone.lifecycleState,
     multiWindowSupport: multiWin.ratio,
     trajectory: determineTrajectory(zone),
+    trajectoryData: zone.trajectory,
+
+    explanation,
+    timeline: zone.timeline ? [...zone.timeline] : [],
+    evidenceHistory: zone.evidenceHistory ? [...zone.evidenceHistory] : [],
 
     qualified: qual.isQualified,
     qualificationStatus: qual.status,
@@ -652,7 +852,10 @@ export function buildScanResult(
  * 3. Sort all formations -> #1 is the best ranked formation (regardless of qualification)
  * 4. Separately identify the best qualified formation
  */
-export function scanBestLiquidityFormation(registry: ZoneRegistry): {
+export function scanBestLiquidityFormation(
+  registry: ZoneRegistry,
+  rankHoldTimeSeconds = 0,
+): {
   bestRanked: ScanResult | null;
   bestQualified: ScanResult | null;
   allRanked: ScanResult[];
@@ -675,7 +878,15 @@ export function scanBestLiquidityFormation(registry: ZoneRegistry): {
   const sorted = [...activeZones].sort((a, b) => compareLiquidityFormations(b, a));
 
   // 2. Build scan results with their individual ranks (1, 2, 3...)
-  const allRanked: ScanResult[] = sorted.map((z, idx) => buildScanResult(z, idx + 1));
+  const allRanked: ScanResult[] = sorted.map((z, idx) =>
+    buildScanResult(
+      z,
+      idx + 1,
+      sorted[idx === 0 ? 1 : 0],
+      undefined,
+      idx === 0 ? rankHoldTimeSeconds : 0,
+    ),
+  );
 
   // 3. Best ranked is ALWAYS #1
   const bestRanked = allRanked[0] ?? null;
@@ -704,12 +915,14 @@ export class BestLiquidityScanner {
   private bestQualified: ScanResult | null = null; // Best qualified formation (or null if none)
   private allRanked: ScanResult[] = [];
   private lastScanTimestamp: number | null = null;
+  private rank1BecameAt: number | null = null;
   private isScanning = false;
   private noRankedFound = false;
   private noQualifiedFound = false;
   private overrideCount = 0;
   private lastOverride: ScannerState["lastOverride"] = null;
   private totalScansPerformed = 0;
+  private scanHistory: ScanSnapshot[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
 
   private snapshot: ScannerState = {
@@ -724,12 +937,13 @@ export class BestLiquidityScanner {
     noQualifiedFound: false,
     totalScansPerformed: 0,
     overrideCount: 0,
+    rankHoldTimeSeconds: 0,
+    scanHistory: [],
     lastOverride: null,
   };
 
   constructor() {
     this.updateSnapshot();
-    // Only run interval in browser
     if (typeof window !== "undefined") {
       this.timer = setInterval(() => this.tickTimer(), 1000);
     }
@@ -741,6 +955,10 @@ export class BestLiquidityScanner {
     const cooldownActive = elapsed < COOLDOWN_MS;
     const cooldownRemainingSeconds = cooldownActive
       ? Math.max(0, Math.ceil((COOLDOWN_MS - elapsed) / 1000))
+      : 0;
+
+    const rankHoldTimeSeconds = this.rank1BecameAt
+      ? Math.max(0, Math.round((now - this.rank1BecameAt) / 1000))
       : 0;
 
     this.snapshot = {
@@ -755,6 +973,8 @@ export class BestLiquidityScanner {
       noQualifiedFound: this.noQualifiedFound,
       totalScansPerformed: this.totalScansPerformed,
       overrideCount: this.overrideCount,
+      rankHoldTimeSeconds,
+      scanHistory: this.scanHistory,
       lastOverride: this.lastOverride,
     };
   }
@@ -796,7 +1016,6 @@ export class BestLiquidityScanner {
   }
 
   private tickTimer() {
-    // If cooldown is running, emit notification each second so UI button updates smoothly
     if (this.lastScanTimestamp && Date.now() - this.lastScanTimestamp <= COOLDOWN_MS + 1000) {
       this.notify();
     }
@@ -812,25 +1031,57 @@ export class BestLiquidityScanner {
     this.notify();
 
     const now = Date.now();
-    const { bestRanked, bestQualified, allRanked, qualifiedCount } =
-      scanBestLiquidityFormation(registry);
+    const rankHoldSeconds = this.rank1BecameAt
+      ? Math.max(0, Math.round((now - this.rank1BecameAt) / 1000))
+      : 0;
+
+    const { bestRanked, bestQualified, allRanked, qualifiedCount } = scanBestLiquidityFormation(
+      registry,
+      rankHoldSeconds,
+    );
 
     this.lastScanTimestamp = now;
     this.totalScansPerformed++;
     this.isScanning = false;
 
     if (bestRanked) {
+      if (!this.currentSelection || this.currentSelection.zoneId !== bestRanked.zoneId) {
+        this.rank1BecameAt = now;
+      }
       this.currentSelection = bestRanked;
       this.bestQualified = bestQualified;
       this.allRanked = allRanked;
       this.noRankedFound = false;
       this.noQualifiedFound = qualifiedCount === 0;
+
+      // Add to scan snapshot history
+      const scanSnap: ScanSnapshot = {
+        id: `SCAN-${now}`,
+        timestamp: now,
+        formattedTime: formatScanTime(now),
+        selectedZoneId: bestRanked.zoneId,
+        selectedSymbol: bestRanked.symbol,
+        selectedContract: bestRanked.contract,
+        selectedScore: bestRanked.score,
+        selectedLifecycle: bestRanked.lifecycleState,
+        selectedQualified: bestRanked.qualified,
+        bestQualifiedSymbol: bestQualified?.symbol,
+        bestQualifiedContract: bestQualified?.contract,
+        bestQualifiedScore: bestQualified?.score,
+        marketCount: registry.snapshot.activeCount,
+        formationCount: registry.snapshot.activeZones.length,
+        rankHoldTimeSeconds: rankHoldSeconds,
+      };
+
+      this.scanHistory.unshift(scanSnap);
+      if (this.scanHistory.length > 15) this.scanHistory.pop();
     } else {
       this.currentSelection = null;
       this.bestQualified = null;
       this.allRanked = [];
       this.noRankedFound = true;
       this.noQualifiedFound = true;
+      this.rank1BecameAt = null;
     }
 
     this.notify();
@@ -849,6 +1100,14 @@ export class BestLiquidityScanner {
     const activeZones = registry.snapshot.activeZones.filter(isEligibleFormation);
     const currentZoneId = this.currentSelection.zoneId;
     const liveCurrentZone = activeZones.find((z) => z.zoneId === currentZoneId);
+    const runnerUpZone = activeZones
+      .filter((z) => z.zoneId !== currentZoneId)
+      .sort((a, b) => compareLiquidityFormations(b, a))[0];
+
+    const now = Date.now();
+    const rankHoldSeconds = this.rank1BecameAt
+      ? Math.max(0, Math.round((now - this.rank1BecameAt) / 1000))
+      : 0;
 
     // 1. Live zone update or invalidation tracking
     if (liveCurrentZone) {
@@ -861,22 +1120,26 @@ export class BestLiquidityScanner {
         this.currentSelection.lifecycleState = "INVALIDATED";
         this.notify();
       } else {
-        // Update live metrics while preserving original scan timestamp and stable zoneId
-        const updated = buildScanResult(liveCurrentZone, 1, {
-          isOverride: this.currentSelection.isOverride,
-          overrideCount: this.currentSelection.overrideCount,
-          previousZoneId: this.currentSelection.previousZoneId,
-          previousMarketContract: this.currentSelection.previousMarketContract,
-          previousScore: this.currentSelection.previousScore,
-          overrideReason: this.currentSelection.overrideReason,
-        });
+        const updated = buildScanResult(
+          liveCurrentZone,
+          1,
+          runnerUpZone,
+          {
+            isOverride: this.currentSelection.isOverride,
+            overrideCount: this.currentSelection.overrideCount,
+            previousZoneId: this.currentSelection.previousZoneId,
+            previousMarketContract: this.currentSelection.previousMarketContract,
+            previousScore: this.currentSelection.previousScore,
+            overrideReason: this.currentSelection.overrideReason,
+          },
+          rankHoldSeconds,
+        );
         updated.scannedAt = this.currentSelection.scannedAt;
         updated.formattedTime = this.currentSelection.formattedTime;
         this.currentSelection = updated;
         this.notify();
       }
     } else {
-      // Zone might be in historical zones (invalidated)
       const hist = registry.snapshot.historicalZones.find((z) => z.zoneId === currentZoneId);
       if (hist) {
         this.currentSelection.isInvalidated = true;
@@ -895,7 +1158,6 @@ export class BestLiquidityScanner {
         if (qual.isQualified) {
           this.bestQualified = buildScanResult(bestQualZone, this.bestQualified.rank);
         } else {
-          // Re-evaluate best qualified
           const remainingQualified = activeZones
             .map((z) => buildScanResult(z, 0))
             .filter((r) => r.qualified)
@@ -912,7 +1174,6 @@ export class BestLiquidityScanner {
         this.noQualifiedFound = this.bestQualified === null;
       }
     } else {
-      // Check if a qualified formation emerged
       const remainingQualified = activeZones
         .map((z) => buildScanResult(z, 0))
         .filter((r) => r.qualified)
@@ -930,20 +1191,26 @@ export class BestLiquidityScanner {
 
         const evalResult = isMateriallySuperior(candidate, liveCurrentZone);
         if (evalResult.isSuperior) {
-          // Perform Immediate Superiority Override!
           const prevZone = liveCurrentZone;
           const prevScore = this.currentSelection.score;
           const prevLabel = `${prevZone.symbol} ${prevZone.contract}`;
           this.overrideCount++;
+          this.rank1BecameAt = Date.now();
 
-          const newSelection = buildScanResult(candidate, 1, {
-            isOverride: true,
-            overrideCount: this.overrideCount,
-            previousZoneId: prevZone.zoneId,
-            previousMarketContract: prevLabel,
-            previousScore: prevScore,
-            overrideReason: evalResult.reason,
-          });
+          const newSelection = buildScanResult(
+            candidate,
+            1,
+            prevZone,
+            {
+              isOverride: true,
+              overrideCount: this.overrideCount,
+              previousZoneId: prevZone.zoneId,
+              previousMarketContract: prevLabel,
+              previousScore: prevScore,
+              overrideReason: evalResult.reason,
+            },
+            0,
+          );
 
           this.lastOverride = {
             at: Date.now(),
@@ -968,12 +1235,14 @@ export class BestLiquidityScanner {
     this.bestQualified = null;
     this.allRanked = [];
     this.lastScanTimestamp = null;
+    this.rank1BecameAt = null;
     this.isScanning = false;
     this.noRankedFound = false;
     this.noQualifiedFound = false;
     this.overrideCount = 0;
     this.lastOverride = null;
     this.totalScansPerformed = 0;
+    this.scanHistory = [];
     this.notify();
   }
 }
