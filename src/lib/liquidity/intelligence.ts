@@ -40,14 +40,7 @@ class Intelligence {
   private store = new OpportunityStore();
   private zoneRegistry = getZoneRegistry();
   private listeners = new Set<() => void>();
-  private cache = new Map<
-    string,
-    {
-      stamp: string;
-      analysis: MarketAnalysis | null;
-      authoritative: AuthoritativeMarketAnalysis | null;
-    }
-  >();
+  private cache = new Map<string, { stamp: string; analysis: MarketAnalysis | null; authoritative: AuthoritativeMarketAnalysis | null }>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private started = false;
   private version = 0;
@@ -101,8 +94,6 @@ class Intelligence {
     this.timer = null;
     this.unsubscribeFeed?.();
     this.unsubscribeFeed = null;
-    // The feed is owned by this production intelligence coordinator. When the
-    // last UI subscriber disappears, stop all WebSocket/interval activity too.
     getFeed().stop();
     this.started = false;
   }
@@ -124,19 +115,17 @@ class Intelligence {
         ? Object.fromEntries(cached.authoritative.contracts.map((c) => [c.id, c]))
         : {};
 
-      // Authoritative V4 is the production intelligence calculation. The legacy
-      // analysis is retained solely to keep older research views operational.
       const analysis = cached?.stamp === stamp ? cached.analysis : analyzeMarket(m.history, m.symbol, prevV3);
-      const authoritative =
-        cached?.stamp === stamp
-          ? cached.authoritative
-          : analyzeAuthoritativeMarket(m.history, m.symbol, prevAuth, m.ticks);
+      const authoritative = cached?.stamp === stamp
+        ? cached.authoritative
+        : analyzeAuthoritativeMarket(m.history, m.symbol, prevAuth);
 
       if (cached?.stamp !== stamp) this.cache.set(m.symbol, { stamp, analysis, authoritative });
-
       if (analysis && authoritative) analysis.authoritativeContracts = authoritative.contracts;
       markets.push({ ...m, analysis, authoritative });
 
+      // Compatibility projections only. They are never consulted by the production
+      // ranking/qualification facade in useIntelligence.ts.
       if (analysis) {
         this.store.ingest(m.symbol, m.name, m.group, analysis, latest?.t ?? 0);
         for (const c of analysis.contracts) {
