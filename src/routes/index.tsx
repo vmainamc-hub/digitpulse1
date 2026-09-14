@@ -10,6 +10,7 @@ import { MarketRail } from "@/components/li/MarketRail";
 import { StateTag } from "@/components/li/primitives";
 import { LedgerView, RadarView } from "@/components/li/radar";
 import { BestLiquidityPanel } from "@/components/li/BestLiquidityPanel";
+import { SignalBriefing } from "@/components/li/SignalBriefing";
 import {
   DangerView,
   LiquidityView,
