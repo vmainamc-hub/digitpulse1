@@ -1,9 +1,10 @@
-import { useState, useSyncExternalStore } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 
 import { getIntelligence, type ComputedMarket, type IntelligenceSnapshot } from "./intelligence";
 import { journal } from "./journal";
 import type { AuthoritativeContract, AuthoritativeMarketAnalysis } from "./authoritative-v4";
 import type { ScanResult, ScannerState } from "./scanner";
+import { COOLDOWN_SECONDS } from "./scanner";
 
 export type {
   ComputedMarket,
@@ -40,8 +41,7 @@ function canonicalVetoes(contract: AuthoritativeContract): string[] {
   return contract.vetoes;
 }
 
-function toScanResult(market: ComputedMarket, contract: AuthoritativeContract, rank: number): ScanResult {
-  const now = Date.now();
+function toScanResult(market: ComputedMarket, contract: AuthoritativeContract, rank: number, scannedAt: number): ScanResult {
   const vetoes = canonicalVetoes(contract);
   const strictQualified = contract.qualified;
   const psychologyAdherence = vetoes.length === 0 ? 100 : Math.max(0, 100 - vetoes.length * 20);
@@ -63,8 +63,8 @@ function toScanResult(market: ComputedMarket, contract: AuthoritativeContract, r
     qualificationStatus: strictQualified ? "QUALIFIED" : contract.qualificationStatus,
     qualificationReasons: strictQualified ? [] : vetoes,
     qualificationReason: strictQualified ? "All authoritative production gates satisfied" : (vetoes[0] ?? "Authoritative production gates not satisfied"),
-    scannedAt: now,
-    formattedTime: new Date(now).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
+    scannedAt,
+    formattedTime: new Date(scannedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
     rankHoldTimeSeconds: 0,
     liquidityLevel: contract.liquidityLevel,
     liquidityTrend: 0,
@@ -102,40 +102,75 @@ function toScanResult(market: ComputedMarket, contract: AuthoritativeContract, r
   } as ScanResult;
 }
 
-/** Production selection facade: ranking is derived directly from authoritative production contracts. */
+function rankAuthoritativeSnapshot(snap: IntelligenceSnapshot, scannedAt: number): ScanResult[] {
+  return snap.markets
+    .flatMap((market) => (market.authoritative?.contracts ?? []).map((contract) => ({ market, contract })))
+    .sort((a, b) => b.contract.confirmation - a.contract.confirmation)
+    .map(({ market, contract }, i) => toScanResult(market, contract, i + 1, scannedAt));
+}
+
+/**
+ * Deliberate production scanner.
+ *
+ * IMPORTANT: the authoritative engine may continue observing live ticks between scans,
+ * but the selected market/contract is a SNAPSHOT taken only when the user presses SCAN.
+ * This prevents the UI from jumping between candidates every intelligence cycle.
+ */
 export function useBestLiquidityScanner() {
   const snap = useIntelligenceSnapshot();
-  const [totalScansPerformed, setTotalScansPerformed] = useState(0);
+  const [scanVersion, setScanVersion] = useState(0);
+  const [lastScanTimestamp, setLastScanTimestamp] = useState<number | null>(null);
+  const [scannedRanked, setScannedRanked] = useState<ScanResult[]>([]);
 
-  const ranked = snap.markets
-    .flatMap((market) => (market.authoritative?.contracts ?? []).map((contract) => ({ market, contract })))
-    .sort((a, b) => b.contract.confirmation - a.contract.confirmation);
-  const allRanked = ranked.map(({ market, contract }, i) => toScanResult(market, contract, i + 1));
-  const currentSelection = allRanked[0] ?? null;
-  const bestQualified = allRanked.find((x) => x.qualified) ?? null;
+  const liveRanked = useMemo(() => rankAuthoritativeSnapshot(snap, Date.now()), [snap]);
+
+  const cooldownRemainingSeconds = lastScanTimestamp === null
+    ? 0
+    : Math.max(0, COOLDOWN_SECONDS - Math.floor((Date.now() - lastScanTimestamp) / 1000));
+  const cooldownActive = lastScanTimestamp !== null && cooldownRemainingSeconds > 0;
+
+  const currentSelection = scannedRanked[0] ?? null;
+  const bestQualified = scannedRanked.find((x) => x.qualified) ?? null;
 
   const scan = () => {
-    setTotalScansPerformed((n) => n + 1);
-    return currentSelection;
+    if (cooldownActive) return currentSelection;
+    const scannedAt = Date.now();
+    const ranked = rankAuthoritativeSnapshot(snap, scannedAt);
+    setScannedRanked(ranked);
+    setLastScanTimestamp(scannedAt);
+    setScanVersion((v) => v + 1);
+    return ranked[0] ?? null;
   };
+
+  const reset = () => {
+    setScannedRanked([]);
+    setLastScanTimestamp(null);
+    setScanVersion((v) => v + 1);
+  };
+
+  // Recompute the cooldown on every intelligence render without ever changing the
+  // selected formation. This is intentionally presentation state, not selection logic.
+  void scanVersion;
+  void liveRanked;
 
   return {
     currentSelection,
     bestQualified,
-    allRanked,
-    lastScanTimestamp: null,
-    cooldownRemainingSeconds: 0,
-    cooldownActive: false,
+    // Keep the leaderboard tied to the last deliberate scan, not live ticks.
+    allRanked: scannedRanked,
+    lastScanTimestamp,
+    cooldownRemainingSeconds,
+    cooldownActive,
     isScanning: false,
-    noRankedFound: allRanked.length === 0,
-    noQualifiedFound: bestQualified === null,
-    totalScansPerformed,
+    noRankedFound: scannedRanked.length === 0,
+    noQualifiedFound: scannedRanked.length > 0 && bestQualified === null,
+    totalScansPerformed: lastScanTimestamp === null ? 0 : scanVersion,
     overrideCount: 0,
     rankHoldTimeSeconds: 0,
     scanHistory: [],
     lastOverride: null,
     scan,
-    reset: () => setTotalScansPerformed(0),
+    reset,
   } as ScannerState & { scan: () => ScanResult | null; reset: () => void };
 }
 
