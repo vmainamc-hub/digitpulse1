@@ -1,11 +1,12 @@
 /**
- * Intelligence store (PHASE 2 + 12).
+ * Production intelligence coordinator.
  *
- * DERIV TICK -> CANONICAL MARKET STATE -> SHARED FEATURE SNAPSHOT ->
- * CONTRACT PROJECTIONS -> OPPORTUNITY ENGINE -> UI
+ * Canonical production decision path:
+ * DERIV FEED -> AUTHORITATIVE V4 -> RANK / QUALIFY -> UI
  *
- * Shared features are computed once per market per changed tick and reused by
- * every consumer. The UI subscribes read-only and never feeds data back.
+ * Legacy opportunity/zone projections are retained only as read-only compatibility
+ * data for the existing research tabs; they are not used for production ranking,
+ * qualification, or selection.
  */
 
 import { getFeed, type FeedSnapshot, type MarketState } from "./feed";
@@ -16,7 +17,6 @@ import {
   type OpportunitySnapshot,
 } from "./opportunity";
 import { getZoneRegistry, ZoneRegistry, type ZoneRegistrySnapshot } from "./zones";
-import { getLiquidityScanner } from "./scanner";
 import { analyzeAuthoritativeMarket, type AuthoritativeMarketAnalysis } from "./authoritative-v4";
 
 export interface ComputedMarket extends MarketState {
@@ -72,9 +72,7 @@ class Intelligence {
   }
 
   getSnapshot = (): IntelligenceSnapshot => this.snapshot;
-
   getServerSnapshot = (): IntelligenceSnapshot => this.snapshot;
-
   getZoneRegistry = (): ZoneRegistry => this.zoneRegistry;
 
   subscribe = (fn: () => void) => {
@@ -103,10 +101,12 @@ class Intelligence {
     this.timer = null;
     this.unsubscribeFeed?.();
     this.unsubscribeFeed = null;
+    // The feed is owned by this production intelligence coordinator. When the
+    // last UI subscriber disappears, stop all WebSocket/interval activity too.
+    getFeed().stop();
     this.started = false;
   }
 
-  /** One analysis cycle over the whole universe. */
   private cycle() {
     const feed = getFeed();
     const t0 = performance.now();
@@ -117,27 +117,24 @@ class Intelligence {
 
     for (const m of snap.markets) {
       const latest = m.history[m.history.length - 1];
-      const stamp = `${m.history.length}:${latest?.t ?? 0}:${latest?.q ?? 0}`;
+      const stamp = `${m.history.length}:${latest?.t ?? 0}:${latest?.q ?? 0}:${m.ticks}`;
       const cached = this.cache.get(m.symbol);
-      // Shared feature computation is skipped entirely when the market has not
-      // advanced since the previous cycle.
       const prevV3 = cached?.analysis?.v3Opportunities ?? {};
       const prevAuth = cached?.authoritative?.contracts
         ? Object.fromEntries(cached.authoritative.contracts.map((c) => [c.id, c]))
         : {};
-      const analysis =
-        cached?.stamp === stamp ? cached.analysis : analyzeMarket(m.history, m.symbol, prevV3);
+
+      // Authoritative V4 is the production intelligence calculation. The legacy
+      // analysis is retained solely to keep older research views operational.
+      const analysis = cached?.stamp === stamp ? cached.analysis : analyzeMarket(m.history, m.symbol, prevV3);
       const authoritative =
         cached?.stamp === stamp
           ? cached.authoritative
-          : analyzeAuthoritativeMarket(m.history, m.symbol, prevAuth);
+          : analyzeAuthoritativeMarket(m.history, m.symbol, prevAuth, m.ticks);
 
       if (cached?.stamp !== stamp) this.cache.set(m.symbol, { stamp, analysis, authoritative });
 
-      if (analysis && authoritative) {
-        analysis.authoritativeContracts = authoritative.contracts;
-      }
-
+      if (analysis && authoritative) analysis.authoritativeContracts = authoritative.contracts;
       markets.push({ ...m, analysis, authoritative });
 
       if (analysis) {
@@ -151,7 +148,6 @@ class Intelligence {
 
     const opportunities = this.store.finalize(activeKeys);
     const zones = this.zoneRegistry.finalize();
-    getLiquidityScanner().onEngineCycle(this.zoneRegistry);
     this.cycleMs = performance.now() - t0;
     this.cycles++;
     this.version++;
