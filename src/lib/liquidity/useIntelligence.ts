@@ -37,8 +37,18 @@ export function useIntelligence() {
   };
 }
 
+function canonicalVetoes(contract: AuthoritativeContract): string[] {
+  return contract.vetoes.filter(
+    (v) =>
+      !v.startsWith("Insufficient formation age") &&
+      !v.startsWith("Insufficient accumulated liquidity") &&
+      !v.startsWith("Elevated structural conflict"),
+  );
+}
+
 function toScanResult(market: ComputedMarket, contract: AuthoritativeContract, rank: number): ScanResult {
   const now = Date.now();
+  const vetoes = canonicalVetoes(contract);
   const strictQualified =
     contract.age >= 12 &&
     contract.accumulatedLiquidity >= 65 &&
@@ -46,9 +56,8 @@ function toScanResult(market: ComputedMarket, contract: AuthoritativeContract, r
     contract.exhaustion >= 65 &&
     contract.delivery >= 62 &&
     contract.conflict < 60 &&
-    contract.vetoes.length === 0 &&
-    contract.qualificationStatus === "QUALIFIED";
-  const psychologyAdherence = contract.vetoes.length === 0 ? 100 : Math.max(0, 100 - contract.vetoes.length * 20);
+    vetoes.length === 0;
+  const psychologyAdherence = vetoes.length === 0 ? 100 : Math.max(0, 100 - vetoes.length * 20);
   const trajectory = contract.trajectory as ScanResult["trajectory"];
 
   return {
@@ -65,8 +74,8 @@ function toScanResult(market: ComputedMarket, contract: AuthoritativeContract, r
     score: contract.confirmation,
     qualified: strictQualified,
     qualificationStatus: strictQualified ? "QUALIFIED" : contract.qualificationStatus,
-    qualificationReasons: strictQualified ? [] : contract.vetoes,
-    qualificationReason: strictQualified ? "All authoritative V4 gates satisfied" : (contract.vetoes[0] ?? "Authoritative V4 gates not satisfied"),
+    qualificationReasons: strictQualified ? [] : vetoes,
+    qualificationReason: strictQualified ? "All canonical V4 gates satisfied" : (vetoes[0] ?? "Canonical V4 gates not satisfied"),
     scannedAt: now,
     formattedTime: new Date(now).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }),
     rankHoldTimeSeconds: 0,
@@ -77,8 +86,8 @@ function toScanResult(market: ComputedMarket, contract: AuthoritativeContract, r
     psychologyDetails: {} as ScanResult["psychologyDetails"],
     liquidityComposition: {} as ScanResult["liquidityComposition"],
     psychologyScore: psychologyAdherence,
-    psychologyValidity: contract.vetoes.length === 0 ? "VALID" : "REJECT",
-    psychologyReasons: contract.vetoes,
+    psychologyValidity: vetoes.length === 0 ? "VALID" : "REJECT",
+    psychologyReasons: vetoes,
     liquidityScore: contract.accumulatedLiquidity,
     formationScore: contract.maturity,
     formationAge: contract.age,
@@ -94,7 +103,7 @@ function toScanResult(market: ComputedMarket, contract: AuthoritativeContract, r
     conflictLevel: contract.conflict >= 60 ? "HIGH" : contract.conflict >= 35 ? "MODERATE" : "LOW",
     conflictScore: contract.conflict,
     lifecycleState: contract.state as ScanResult["lifecycleState"],
-    multiWindowSupport: `${[contract.maturity >= 62, contract.exhaustion >= 65, contract.delivery >= 62, contract.reservoirScore >= 50, contract.conflict < 60, contract.vetoes.length === 0].filter(Boolean).length}/6`,
+    multiWindowSupport: `${[contract.maturity >= 62, contract.exhaustion >= 65, contract.delivery >= 62, contract.reservoirScore >= 50, contract.conflict < 60, vetoes.length === 0].filter(Boolean).length}/6`,
     trajectory,
     explanation: { primaryReasons: contract.evidence.slice(0, 6), runnerUpComparison: null },
     timeline: [],
@@ -106,10 +115,7 @@ function toScanResult(market: ComputedMarket, contract: AuthoritativeContract, r
   } as ScanResult;
 }
 
-/**
- * Production selection facade. The UI ranking now reads the cached authoritative
- * V4 projections directly; the former independent scanner is not invoked.
- */
+/** Production selection facade: ranking is derived directly from authoritative V4 projections. */
 export function useBestLiquidityScanner() {
   const snap = useIntelligenceSnapshot();
   const [totalScansPerformed, setTotalScansPerformed] = useState(0);
